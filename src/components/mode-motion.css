@@ -1,8 +1,11 @@
-/* Brief selection feedback; all movement is driven by user interaction. */
+/* Rotating-border hover adapted from Uiverse.io by ElSombrero2.
+   Responsive content, selection feedback and keyboard support are LeVer additions. */
 .execution-modes .execution-card {
   position: relative;
   isolation: isolate;
-  background: #101612;
+  overflow: hidden;
+  padding: 2px;
+  background: #171717;
   transform: translateY(0);
   box-shadow: 0 0 0 0 #74e5b100;
   transition: transform 280ms cubic-bezier(.2, .75, .25, 1),
@@ -12,22 +15,77 @@
 .execution-modes .execution-card::before {
   content: '';
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  width: 80px;
+  height: calc(200% + 600px);
   z-index: -1;
   pointer-events: none;
-  background: linear-gradient(120deg, #244d3480, #14291c50 65%, transparent);
+  background: linear-gradient(#ff2288, #387ef0);
+  transform: translate(-50%, -50%) rotate(0deg);
   opacity: 0;
-  transition: opacity 280ms ease;
+  transition: opacity 300ms ease;
+  animation: lever-card-border-rotation 8000ms infinite linear;
+  animation-play-state: paused;
+}
+
+.execution-modes .execution-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: #17171733;
+  backdrop-filter: blur(50px);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.execution-modes .mode-card-content {
+  position: relative;
+  isolation: isolate;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #171717;
+}
+
+.execution-modes .mode-card-content::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 50px;
+  z-index: -1;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  filter: blur(50px);
+  opacity: 0;
+  transition: opacity 300ms ease;
 }
 
 .execution-modes .execution-card.selected {
-  background: #101612;
+  background: #171717;
   border-color: #74e5b196;
   transform: translateY(-3px);
   box-shadow: 0 8px 26px #0311083d, 0 0 0 1px #74e5b10c;
 }
 
-.execution-modes .execution-card.selected::before { opacity: 1; }
+.execution-modes .execution-card.selected .mode-card-content {
+  background: linear-gradient(120deg, #1c2d22, #171b18);
+}
+
+.execution-modes .execution-card:has(:focus-visible)::before {
+  opacity: 1;
+  animation-play-state: running;
+}
+
+.execution-modes .execution-card:has(:focus-visible)::after,
+.execution-modes .execution-card:has(:focus-visible) .mode-card-content::before {
+  opacity: 1;
+}
 
 .execution-modes .execution-card:has(.mode-select:focus-visible) {
   outline: 2px solid var(--accent);
@@ -91,6 +149,16 @@
 .execution-modes .mode-detail-reveal > div { min-height: 0; overflow: hidden; }
 
 @media (hover: hover) and (pointer: fine) {
+  .execution-modes .execution-card:hover::before {
+    opacity: 1;
+    animation-play-state: running;
+  }
+
+  .execution-modes .execution-card:hover::after,
+  .execution-modes .execution-card:hover .mode-card-content::before {
+    opacity: 1;
+  }
+
   .execution-modes .execution-card:not(.selected):hover {
     transform: translateY(-2px);
     border-color: #8dc5a355;
@@ -98,9 +166,16 @@
   }
 }
 
+@keyframes lever-card-border-rotation {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .execution-modes .execution-card,
   .execution-modes .execution-card::before,
+  .execution-modes .execution-card::after,
+  .execution-modes .mode-card-content::before,
   .execution-modes .execution-card-top > svg,
   .execution-modes .mode-check,
   .execution-modes .mode-check > svg,

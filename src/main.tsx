@@ -7,6 +7,7 @@ import App from './App';
 import './styles.css';
 import './site.css';
 import './typography.css';
+import './components/button-motion.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><BrowserRouter><App /></BrowserRouter></React.StrictMode>,

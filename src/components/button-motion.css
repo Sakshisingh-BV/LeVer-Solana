@@ -1,0 +1,65 @@
+/* Diagonal-fill hover adapted from Uiverse.io by vikiWayne.
+   Scoped to action buttons and CTA links; existing sizing and type are retained. */
+.site-shell :is(.button, .nav-cta) {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  transition: color 1000ms ease, transform 1000ms ease,
+    outline-color 1000ms ease, border-color 1000ms ease,
+    background-color 1000ms ease, box-shadow 1000ms ease;
+}
+
+.site-shell :is(.button, .nav-cta)::before {
+  content: '';
+  position: absolute;
+  left: -50px;
+  top: 0;
+  width: 0;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  background: #237a4b;
+  transform: skewX(45deg);
+  transition: width 1000ms ease;
+}
+
+.site-shell :is(.button, .nav-cta):not(:disabled):focus-visible {
+  color: #fff;
+  outline-color: #74e5b1;
+  border-color: #74e5b1;
+  box-shadow: 4px 5px 17px -4px #26834f;
+}
+
+.site-shell :is(.button, .nav-cta):not(:disabled):focus-visible::before {
+  width: 250%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .site-shell :is(.button, .nav-cta):not(:disabled):hover {
+    color: #fff;
+    transform: scale(1.1);
+    outline-color: #74e5b1;
+    border-color: #74e5b1;
+    box-shadow: 4px 5px 17px -4px #26834f;
+  }
+
+  .site-shell :is(.button, .nav-cta):not(:disabled):hover::before {
+    width: 250%;
+  }
+}
+
+.site-shell :is(.button, .nav-cta):not(:disabled):active {
+  transform: scale(.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-shell :is(.button, .nav-cta),
+  .site-shell :is(.button, .nav-cta)::before {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .site-shell :is(.button, .nav-cta) { transform: none !important; }
+}
