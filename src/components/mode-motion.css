@@ -1,0 +1,120 @@
+/* Brief selection feedback; all movement is driven by user interaction. */
+.execution-modes .execution-card {
+  position: relative;
+  isolation: isolate;
+  background: #101612;
+  transform: translateY(0);
+  box-shadow: 0 0 0 0 #74e5b100;
+  transition: transform 280ms cubic-bezier(.2, .75, .25, 1),
+    border-color 240ms ease, box-shadow 280ms ease;
+}
+
+.execution-modes .execution-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(120deg, #244d3480, #14291c50 65%, transparent);
+  opacity: 0;
+  transition: opacity 280ms ease;
+}
+
+.execution-modes .execution-card.selected {
+  background: #101612;
+  border-color: #74e5b196;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 26px #0311083d, 0 0 0 1px #74e5b10c;
+}
+
+.execution-modes .execution-card.selected::before { opacity: 1; }
+
+.execution-modes .execution-card:has(.mode-select:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.execution-modes .execution-card:has(.mode-select:active) {
+  transform: translateY(-1px) scale(.995);
+}
+
+.execution-modes .execution-card-top > svg {
+  transition: color 240ms ease, transform 320ms cubic-bezier(.2, .8, .25, 1.2);
+  transform: scale(1);
+}
+
+.execution-modes .selected .execution-card-top > svg {
+  transform: translateY(-1px) scale(1.08);
+}
+
+.execution-modes .mode-check {
+  transition: border-color 220ms ease, background-color 220ms ease,
+    box-shadow 300ms ease, transform 320ms cubic-bezier(.2, .8, .25, 1.3);
+  transform: scale(1);
+}
+
+.execution-modes .mode-check > svg {
+  opacity: 0;
+  transform: scale(.45) rotate(-25deg);
+  transition: opacity 160ms ease, transform 300ms cubic-bezier(.2, .8, .25, 1.35);
+}
+
+.execution-modes .selected .mode-check {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 4px #74e5b10b;
+}
+
+.execution-modes .selected .mode-check > svg {
+  opacity: 1;
+  transform: scale(1) rotate(0);
+}
+
+.execution-modes .mode-learn > svg { transition: transform 240ms ease; }
+
+.execution-modes .mode-detail-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 280ms ease, opacity 200ms ease,
+    visibility 0s linear 280ms;
+}
+
+.execution-modes .mode-detail-reveal.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition: grid-template-rows 280ms ease, opacity 200ms ease,
+    visibility 0s;
+}
+
+.execution-modes .mode-detail-reveal > div { min-height: 0; overflow: hidden; }
+
+@media (hover: hover) and (pointer: fine) {
+  .execution-modes .execution-card:not(.selected):hover {
+    transform: translateY(-2px);
+    border-color: #8dc5a355;
+    box-shadow: 0 6px 20px #03110830;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .execution-modes .execution-card,
+  .execution-modes .execution-card::before,
+  .execution-modes .execution-card-top > svg,
+  .execution-modes .mode-check,
+  .execution-modes .mode-check > svg,
+  .execution-modes .mode-learn > svg,
+  .execution-modes .mode-detail-reveal {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .execution-modes .execution-card,
+  .execution-modes .execution-card-top > svg,
+  .execution-modes .mode-check,
+  .execution-modes .mode-check > svg,
+  .execution-modes .mode-learn > svg {
+    transform: none !important;
+  }
+}

@@ -19,8 +19,15 @@ target/
 .anchor/
 test-ledger/
 
-# Submodules / heavy clone caches if any
+# Submodules / heavy clone caches
 LeVer/libs_cache/forge-std/
 LeVer/libs_cache/openzeppelin-contracts/
 LeVer/logs/
 LeVer/.venv-slither/
+
+# Node.js
+node_modules/
+dist/
+.env.local
+*.tsbuildinfo
+.qa/

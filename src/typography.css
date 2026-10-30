@@ -1,0 +1,27 @@
+/* Self-hosted variable fonts: geometric headings and easy-to-read interface text. */
+:root {
+  --font-body: 'Manrope Variable', 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
+  font-optical-sizing: auto;
+}
+
+h1, h2, h3, h4,
+.lever-logo,
+.brand-name {
+  font-family: var(--font-display);
+}
+
+/* Keep emphasis in the same clean type family across documentation and workspace. */
+em {
+  font-family: inherit;
+  font-style: normal;
+  font-weight: inherit;
+}
+
+.hero h1 { letter-spacing: -.055em; }
+.section-heading h2,
+.closing-section h2,
+.page-heading h1 { letter-spacing: -.045em; }
+.mode-select h4 { letter-spacing: -.025em; }
+.lever-logo > span { letter-spacing: -.065em; }
