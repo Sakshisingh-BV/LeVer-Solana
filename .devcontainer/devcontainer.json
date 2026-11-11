@@ -1,0 +1,55 @@
+{
+  "name": "LeVer Solana (Rust 1.79.0 | Solana 1.18.26 | Anchor 0.30.1)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+
+  // Node 20 and Python 3.11 come from Dev Container Features.
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11",
+      "installTools": false
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+
+  // Start on the smallest machine to conserve free quota.
+  // Raise to 4 cores in "New with options" if builds are too slow.
+  "hostRequirements": {
+    "cpus": 2
+  },
+
+  // Consumed by LeVer/core/solana_config.py (no code change required).
+  "containerEnv": {
+    "ANCHOR_CLI": "anchor",
+    "SOLANA_CLI": "solana",
+    "SOLANA_TEST_VALIDATOR_URL": "http://127.0.0.1:8899",
+    "SOLANA_CLUSTER": "localnet",
+    "RUST_BACKTRACE": "1"
+  },
+
+  "forwardPorts": [8000, 5173, 8899],
+  "portsAttributes": {
+    "8000": { "label": "LeVer API" },
+    "5173": { "label": "LeVer frontend (Vite)" },
+    "8899": { "label": "solana-test-validator RPC" }
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "ms-python.python",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+      }
+    }
+  }
+}
