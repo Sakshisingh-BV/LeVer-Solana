@@ -53,10 +53,19 @@ MSRV_TARGET="1.75"
 #                        blake3 declares no rust-version, so the resolver cannot avoid it.
 #   zeroize_derive 1.4.2 solana-program zeroize ^1.3 + curve25519-dalek 3.2.1 (zeroize >=1,<1.4)
 #                        force zeroize 1.3.0 whose zeroize_derive req is a bare ^1 -> 1.5.0 (Rust 1.85).
+#   jobserver 0.1.32     cc -> jobserver (^0.1.32). jobserver >= 0.1.33 adds getrandom ^0.3 (windows) ->
+#                        wasip2 -> wit-bindgen (every version needs Rust >= 1.85, so the resolver cannot
+#                        avoid it). Those are wasm/windows-only crates that are never compiled for SBF, but
+#                        `cargo metadata` (run by cargo build-sbf) must parse every manifest in the lock.
+#                        0.1.32 depends only on libc. Found from a real Cargo.lock chain:
+#                        jobserver 0.1.34 -> getrandom 0.3.4 -> wasip2 -> wit-bindgen 0.57.1.
 PINS=(
   "blake3 1.8.2"
   "zeroize_derive 1.4.2"
+  "jobserver 0.1.32"
 )
+# Crates that must NOT appear in the final lock (every version needs Rust >= 1.85).
+FORBIDDEN_CRATES=(wit-bindgen)
 
 lockcargo() { CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo "+$LOCK_TOOLCHAIN" "$@"; }
 
@@ -76,6 +85,21 @@ lock_versions() {  # lock_versions <crate> : versions of <crate> present in the 
     /^name = /    { n=$3; gsub(/"/,"",n); hit=(n==want); next }
     /^version = / { if (hit) { v=$3; gsub(/"/,"",v); print v; hit=0 } }
   ' Cargo.lock
+}
+lock_chain_up() {  # lock_chain_up <crate> : dependents, then their dependents (up to 6 levels), nearest first
+  local level=("$1") seen=" $1 " next n d _i
+  for _i in 1 2 3 4 5 6; do
+    next=()
+    for n in "${level[@]}"; do
+      lock_why "$n"
+      while read -r d; do
+        [ -z "$d" ] && continue
+        case "$seen" in *" $d "*) ;; *) seen="$seen$d "; next+=("$d") ;; esac
+      done < <(lock_why "$n" | awk '{print $1}' | sort -u)
+    done
+    [ "${#next[@]}" -eq 0 ] && break
+    level=("${next[@]}")
+  done
 }
 lock_has_bad_crypto_common() { lock_versions crypto-common | grep -q '^0\.2'; }
 
@@ -142,6 +166,13 @@ prepare_project() {  # returns non-zero (after reporting) if anything fails
   if lock_has_bad_crypto_common; then
     bad "crypto-common 0.2.x is STILL in Cargo.lock after pinning. Remaining dependents:"; lock_why crypto-common; pin_failed=1
   fi
+  for fc in "${FORBIDDEN_CRATES[@]}"; do
+    if [ -n "$(lock_versions "$fc")" ]; then
+      bad "$fc $(lock_versions "$fc" | tr '\n' ' ')is still in Cargo.lock (needs Rust >= 1.85). Chain, nearest dependents first:"
+      lock_chain_up "$fc"
+      pin_failed=1
+    fi
+  done
   lockver="$(sed -n 's/^version = \([0-9][0-9]*\)$/\1/p' Cargo.lock | head -n1)"
   if [ "${lockver:-0}" -ge 4 ]; then bad "Cargo.lock became format v$lockver after pinning"; pin_failed=1; fi
   [ "$pin_failed" = 0 ]
