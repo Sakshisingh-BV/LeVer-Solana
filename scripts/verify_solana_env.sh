@@ -59,10 +59,14 @@ MSRV_TARGET="1.75"
 #                        `cargo metadata` (run by cargo build-sbf) must parse every manifest in the lock.
 #                        0.1.32 depends only on libc. Found from a real Cargo.lock chain:
 #                        jobserver 0.1.34 -> getrandom 0.3.4 -> wasip2 -> wit-bindgen 0.57.1.
+#   proc-macro2 1.0.94   Not an MSRV issue: proc-macro2 >= 1.0.95 removed Span::source_file(), which
+#                        anchor-syn 0.30.x calls while building the IDL ("no method named `source_file`").
+#                        All proc-macro2 dependents in the lock accept 1.0.94 (strictest: ^1.0.91).
 PINS=(
   "blake3 1.8.2"
   "zeroize_derive 1.4.2"
   "jobserver 0.1.32"
+  "proc-macro2 1.0.94"
 )
 # Crates that must NOT appear in the final lock (every version needs Rust >= 1.85).
 FORBIDDEN_CRATES=(wit-bindgen)
