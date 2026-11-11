@@ -6,8 +6,8 @@
 #
 # A throw-away Anchor project is created in a temp directory and deleted
 # afterwards. No file in this repository is read or modified.
-# The temp project's Cargo.lock is generated and blake3 is pinned to a version
-# that is compatible with Rust 1.79 (see BLAKE3_PIN below for the reason).
+# The temp project's Cargo.lock is generated and the crates listed in PINS are
+# pinned to versions that Rust 1.79 can parse (reasons are documented at PINS).
 set -uo pipefail
 
 EXPECT_RUST="1.79.0"
@@ -34,10 +34,18 @@ command -v cargo-kani >/dev/null 2>&1 && bad "Kani is installed (not expected in
 
 # --- Cargo.lock helpers (read the lockfile only; no crate download/parse) -----
 # Cargo 1.79 ignores `rust-version`, so a fresh lockfile can select crates that
-# need a newer Rust. Known case: solana-program 1.18.26 -> blake3 ^1.5.0
-# (features digest + traits-preview). blake3 >= 1.8.4 pulls digest ^0.11 ->
-# crypto-common 0.2.x (Rust 1.85 / edition 2024), which Cargo 1.79 cannot parse.
-BLAKE3_PIN="1.8.2"   # last blake3 line whose deps (digest ^0.10, constant_time_eq 0.3) are all old
+# need a newer Rust (edition 2024 / Rust 1.85), which Cargo 1.79 cannot parse.
+# Known cases for solana-program 1.18.26 (each pin: "<crate> <version>"):
+#   blake3 1.8.2         solana-program -> blake3 ^1.5.0 (features digest + traits-preview).
+#                        blake3 >= 1.8.4 -> digest ^0.11 -> crypto-common 0.2.x (Rust 1.85).
+#                        1.8.2 deps (digest ^0.10, constant_time_eq 0.3) are all old.
+#   zeroize_derive 1.4.2 solana-program zeroize ^1.3 + curve25519-dalek 3.2.1 (zeroize >=1,<1.4)
+#                        force zeroize 1.3.0, whose zeroize_derive req is a bare ^1, so Cargo
+#                        picks zeroize_derive 1.5.0 (Rust 1.85). 1.4.2 is edition 2021 (MSRV 1.56).
+PINS=(
+  "blake3 1.8.2"
+  "zeroize_derive 1.4.2"
+)
 
 lock_why() {  # lock_why <crate> : lockfile packages that depend on <crate>
   awk -v want="$1" '
@@ -57,32 +65,37 @@ lock_versions() {  # lock_versions <crate> : versions of <crate> present in the 
 }
 lock_has_bad_crypto_common() { lock_versions crypto-common | grep -q '^0\.2'; }
 
-echo "== 2. Prepare temp project and pin blake3 =="
+echo "== 2. Prepare temp project and pin Rust-1.79-incompatible crates =="
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 PREP_OK=0
 if (cd "$WORK" && anchor init verify_prog --no-git >"$WORK/init.log" 2>&1); then
   cd "$WORK/verify_prog" || exit 1
   if cargo generate-lockfile >"$WORK/lock.log" 2>&1; then
-    echo "  lockfile generated; blake3 in lock: $(lock_versions blake3 | tr '\n' ' ')"
+    echo "  lockfile generated. Chain evidence BEFORE pinning:"
+    for pin in "${PINS[@]}"; do
+      read -r crate ver <<<"$pin"
+      echo "  - $crate in lock: $(lock_versions "$crate" | tr '\n' ' ')(pin -> $ver); depended on by:"
+      lock_why "$crate"
+    done
     if lock_has_bad_crypto_common; then
-      echo "  CONFIRMED (before pin): crypto-common $(lock_versions crypto-common | tr '\n' ' ') is in the lockfile. Depended on by:"
+      echo "  - crypto-common $(lock_versions crypto-common | tr '\n' ' ')(0.2.x needs Rust 1.85); depended on by:"
       lock_why crypto-common
-      echo "  ...and the package(s) that pull those in:"
-      for c in digest cpufeatures; do lock_why "$c"; done
-    else
-      echo "  NOTE: crypto-common 0.2.x is NOT in the lockfile before pinning; the diagnosed cause does not apply to this tree."
     fi
-    if cargo update -p blake3 --precise "$BLAKE3_PIN" >"$WORK/pin.log" 2>&1; then
-      if lock_has_bad_crypto_common; then
-        bad "after blake3=$BLAKE3_PIN pin, crypto-common 0.2.x is STILL in Cargo.lock. Remaining dependents:"
-        lock_why crypto-common
-      else
-        ok "blake3 pinned to $BLAKE3_PIN; no crypto-common 0.2.x in Cargo.lock"; PREP_OK=1
+    pin_failed=0
+    for pin in "${PINS[@]}"; do
+      read -r crate ver <<<"$pin"
+      if [ -z "$(lock_versions "$crate")" ]; then echo "  skip $crate (not in lockfile)"; continue; fi
+      if ! cargo update -p "$crate" --precise "$ver" >"$WORK/pin-$crate.log" 2>&1; then
+        bad "cargo update -p $crate --precise $ver failed:"; sed 's/^/    /' "$WORK/pin-$crate.log"; pin_failed=1; continue
       fi
-    else
-      bad "cargo update -p blake3 --precise $BLAKE3_PIN failed:"; sed 's/^/    /' "$WORK/pin.log"
+      if lock_versions "$crate" | grep -qx "$ver"; then ok "$crate pinned to $ver"
+      else bad "$crate is not at $ver after pinning (lock has: $(lock_versions "$crate" | tr '\n' ' '))"; pin_failed=1; fi
+    done
+    if lock_has_bad_crypto_common; then
+      bad "crypto-common 0.2.x is STILL in Cargo.lock after pinning. Remaining dependents:"; lock_why crypto-common; pin_failed=1
     fi
+    [ "$pin_failed" = 0 ] && PREP_OK=1
   else
     bad "cargo generate-lockfile failed:"; sed 's/^/    /' "$WORK/lock.log"
   fi
