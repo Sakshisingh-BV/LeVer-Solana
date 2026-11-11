@@ -1,0 +1,23 @@
+Kani Rust Verifier 0.56.0 (cargo plugin)
+Checking harness check_add...
+CBMC 6.3.1 (cbmc-6.3.1)
+
+RESULTS:
+Check 1: check_add.assertion.1
+	 - Status: SUCCESS
+	 - Description: "assertion failed: a.checked_add(b).is_some() || a > u64::MAX - b"
+	 - Location: src/lib.rs:12:9 in function check_add
+
+Check 2: check_add.arithmetic_overflow.1
+	 - Status: SUCCESS
+	 - Description: "attempt to add with overflow"
+	 - Location: src/lib.rs:13:17 in function check_add
+
+
+SUMMARY:
+ ** 0 of 2 failed
+
+VERIFICATION:- SUCCESSFUL
+Verification Time: 0.08s
+
+Complete - 1 successfully verified harnesses, 0 failures, 1 total.

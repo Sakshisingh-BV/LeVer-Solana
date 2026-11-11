@@ -1,0 +1,23 @@
+Kani Rust Verifier 0.56.0 (cargo plugin)
+Checking harness check_loop...
+
+RESULTS:
+Check 1: check_loop.unwind.0
+	 - Status: FAILURE
+	 - Description: "unwinding assertion loop 0"
+	 - Location: src/lib.rs:90:5 in function check_loop
+
+Check 2: check_loop.assertion.1
+	 - Status: UNDETERMINED
+	 - Description: "assertion failed: total <= cap"
+	 - Location: src/lib.rs:93:9 in function check_loop
+
+SUMMARY:
+ ** 1 of 2 failed (1 undetermined)
+
+VERIFICATION:- FAILED
+[Kani] info: Verification output shows one or more unwinding failures.
+[Kani] tip: Consider increasing the unwinding value or disabling `--unwinding-assertions`.
+Verification Time: 0.20s
+
+Complete - 0 successfully verified harnesses, 1 failures, 1 total.

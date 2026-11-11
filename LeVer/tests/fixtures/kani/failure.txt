@@ -1,0 +1,26 @@
+Kani Rust Verifier 0.56.0 (cargo plugin)
+Checking harness check_withdraw...
+
+RESULTS:
+Check 1: check_withdraw.assertion.1
+	 - Status: SUCCESS
+	 - Description: "assertion failed: vault.authority == signer"
+	 - Location: src/lib.rs:30:9 in function check_withdraw
+
+Check 2: check_withdraw.arithmetic_overflow.1
+	 - Status: FAILURE
+	 - Description: "attempt to subtract with overflow"
+	 - Location: src/lib.rs:34:5 in function check_withdraw
+
+
+SUMMARY:
+ ** 1 of 2 failed
+Failed Checks: attempt to subtract with overflow
+ File: "src/lib.rs", line 34, in check_withdraw
+
+VERIFICATION:- FAILED
+Verification Time: 0.11s
+
+Summary:
+Verification failed for - check_withdraw
+Complete - 0 successfully verified harnesses, 1 failures, 1 total.

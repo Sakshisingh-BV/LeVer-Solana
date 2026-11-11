@@ -1,0 +1,34 @@
+Kani Rust Verifier 0.56.0 (cargo plugin)
+Checking harness check_signer...
+
+RESULTS:
+Check 1: check_signer.assertion.1
+	 - Status: SUCCESS
+	 - Description: "assertion failed: ctx.accounts.authority.is_signer"
+	 - Location: src/lib.rs:50:9 in function check_signer
+
+SUMMARY:
+ ** 0 of 1 failed
+
+VERIFICATION:- SUCCESSFUL
+Verification Time: 0.05s
+
+Checking harness check_pda_bump...
+
+RESULTS:
+Check 1: check_pda_bump.assertion.1
+	 - Status: FAILURE
+	 - Description: "assertion failed: bump == canonical_bump"
+	 - Location: src/lib.rs:71:9 in function check_pda_bump
+
+SUMMARY:
+ ** 1 of 1 failed
+Failed Checks: assertion failed: bump == canonical_bump
+ File: "src/lib.rs", line 71, in check_pda_bump
+
+VERIFICATION:- FAILED
+Verification Time: 0.07s
+
+Summary:
+Verification failed for - check_pda_bump
+Complete - 1 successfully verified harnesses, 1 failures, 2 total.
