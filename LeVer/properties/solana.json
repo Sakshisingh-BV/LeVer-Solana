@@ -1,6 +1,6 @@
 {
   "target": "solana",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "properties": [
     {
       "id": "SOL-01",
@@ -161,6 +161,537 @@
       "detection_patterns": ["invoke.*without.*check", "CPI.*no.*reload"],
       "remediation": "After every CPI, reload affected accounts and validate expected post-conditions before continuing.",
       "references": []
+    },
+    {
+      "id": "SOL-11",
+      "name": "Account Type Cosplay / Discriminator Validation",
+      "category": "account_validation",
+      "severity": "critical",
+      "invariant_template": "Every account deserialized as type T MUST carry T's discriminator, so an account of a different type with a compatible layout can never be accepted as T.",
+      "description": "A program deserializes account data without checking an 8-byte (Anchor) or explicit type tag. An attacker passes an account of another type of the same program (identical field layout, e.g. a User account where an Admin account is expected) and inherits its privileges.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "Account<'info, T> (checks owner + discriminator); #[account] / #[derive(InitSpace)] types get a discriminator automatically",
+        "common_vuln": "Manual BorshDeserialize::try_from_slice on AccountInfo data, or UncheckedAccount used as a typed account",
+        "formal_invariant": "forall ix, forall a in ctx.accounts typed T: a.data[0..8] == DISC(T)  AND  DISC(T) != DISC(U) for all U != T",
+        "anchor_checks": [
+          "Declare every typed account as Account<'info, T> / AccountLoader<'info, T>",
+          "If manual deserialization is unavoidable, call T::try_deserialize (checks discriminator) instead of try_from_slice",
+          "Give each account struct a distinct discriminator (default Anchor behaviour) or an explicit enum tag"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-11-1",
+            "rule": "Flag any BorshDeserialize::try_from_slice / try_from_slice_unchecked applied to AccountInfo data."
+          },
+          {
+            "id": "SR-11-2",
+            "rule": "Flag UncheckedAccount/AccountInfo fields whose data is later deserialized into a program-defined struct."
+          },
+          {
+            "id": "SR-11-3",
+            "rule": "Flag two program account structs with identical field layouts that lack distinct discriminators (non-Anchor programs)."
+          }
+        ],
+        "attacker_test": {
+          "name": "type_cosplay_privileged_account",
+          "setup": "Program has two account types A (user) and B (admin) with identical layout; privileged ix expects B.",
+          "attack": "Mallory calls the privileged ix passing an A account she controls in the B slot.",
+          "expected": "Transaction fails with AccountDiscriminatorMismatch (Anchor error 3002) or an explicit tag error; no state change."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "Pattern + account-struct inspection finds manual deserialization and untyped accounts."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Anchor test passes a same-layout foreign-type account and asserts rejection."
+          },
+          "formal": {
+            "level": "partial",
+            "note": "Kani can prove a pure deserialize-guard function rejects any buffer whose tag != DISC(T); real account loading is not modelled."
+          }
+        }
+      },
+      "detection_patterns": [
+        "try_from_slice(?:_unchecked)?\\s*\\(",
+        "\\bUncheckedAccount<'info>",
+        "\\.data\\.borrow\\(\\)\\s*\\[\\s*\\d*\\s*\\.\\."
+      ],
+      "remediation": "Use Account<'info, T> or AccountLoader; for manual parsing use T::try_deserialize so the discriminator is verified.",
+      "references": [
+        "https://www.soldev.app/course/type-cosplay"
+      ]
+    },
+    {
+      "id": "SOL-12",
+      "name": "Account Re-initialization",
+      "category": "state_integrity",
+      "severity": "critical",
+      "invariant_template": "An initialization instruction MUST succeed at most once per account; an already-initialized account MUST NOT be re-initialized or have its authority overwritten.",
+      "description": "An initialize instruction can run on an account that already holds state (init_if_needed without guards, manual create_account/data writes without an is_initialized check). An attacker re-initializes a victim's account and replaces its authority or balances.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "#[account(init, payer = ..., space = ...)] (fails if the account already exists); avoid init_if_needed unless guarded",
+        "common_vuln": "init_if_needed without checking existing authority; manual initialization without an is_initialized flag",
+        "formal_invariant": "forall acct: initialize(acct) is enabled only if state(acct) == Uninitialized; after success state(acct) == Initialized AND authority is unchanged by any later initialize call",
+        "anchor_checks": [
+          "Use #[account(init, ...)] for one-time setup",
+          "If init_if_needed is required, add constraint on existing authority and guard the handler with require!(!acct.is_initialized)",
+          "Store an is_initialized flag (or a state enum) for non-Anchor initialization paths"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-12-1",
+            "rule": "Flag every use of init_if_needed (requires manual review of the handler guard)."
+          },
+          {
+            "id": "SR-12-2",
+            "rule": "Flag initialize-style handlers (name matches initiali[sz]e|setup|create) that write authority/owner fields without reading an is_initialized flag or state enum first."
+          },
+          {
+            "id": "SR-12-3",
+            "rule": "Flag system_program::create_account / allocate+assign performed without a preceding data-length or lamports==0 check."
+          }
+        ],
+        "attacker_test": {
+          "name": "reinitialize_overwrites_authority",
+          "setup": "Alice initializes vault V with authority=Alice and deposits funds.",
+          "attack": "Mallory calls initialize on V again with authority=Mallory.",
+          "expected": "Second initialize fails (account already in use / custom AlreadyInitialized); V.authority stays Alice."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "init_if_needed and unguarded initialize handlers are syntactically identifiable."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Call initialize twice with different authorities and assert second call reverts."
+          },
+          "formal": {
+            "level": "yes",
+            "note": "State-machine model (Uninitialized -> Initialized) extracted from handler logic is a good Kani target."
+          }
+        }
+      },
+      "detection_patterns": [
+        "init_if_needed",
+        "system_program::create_account\\s*\\(",
+        "fn\\s+initiali[sz]e\\w*\\s*\\("
+      ],
+      "remediation": "Use plain init, or guard init_if_needed handlers with an explicit initialized flag and authority check.",
+      "references": [
+        "https://www.soldev.app/course/reinitialization-attacks"
+      ]
+    },
+    {
+      "id": "SOL-13",
+      "name": "Account Closing / Revival Safety",
+      "category": "state_integrity",
+      "severity": "high",
+      "invariant_template": "A closed account MUST have its lamports transferred out, its data zeroed and its discriminator invalidated, so it cannot be revived or reused within the same transaction.",
+      "description": "An account is 'closed' only by moving lamports, leaving data and discriminator intact. In the same transaction an attacker refunds rent so the account survives the runtime's garbage collection and its stale state is used again (revival attack).",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "#[account(mut, close = receiver)] (zeroes data and sets the CLOSED_ACCOUNT_DISCRIMINATOR)",
+        "common_vuln": "Manual lamport zeroing without clearing data / discriminator; closing without verifying the receiver",
+        "formal_invariant": "after close(acct): lamports(acct) == 0 AND data(acct) == zeros OR disc(acct) == CLOSED; and any later ix using acct in the same tx fails discriminator check",
+        "anchor_checks": [
+          "Always close via #[account(close = receiver)] with receiver constrained (has_one / Signer)",
+          "If closing manually: zero data, write CLOSED_ACCOUNT_DISCRIMINATOR, then move lamports",
+          "Constrain the lamport receiver to the authority, never an arbitrary account"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-13-1",
+            "rule": "Flag manual lamport zeroing (**x.lamports.borrow_mut() = 0) in a handler that does not also write the closed discriminator or zero the data."
+          },
+          {
+            "id": "SR-13-2",
+            "rule": "Flag close = target where target is not a Signer and has no has_one/address constraint."
+          },
+          {
+            "id": "SR-13-3",
+            "rule": "Flag AccountInfo::assign(&system_program::ID) / realloc(0) closes without data clearing."
+          }
+        ],
+        "attacker_test": {
+          "name": "close_then_revive_same_tx",
+          "setup": "Program exposes close_vault (manual lamport transfer) and deposit.",
+          "attack": "In one transaction: close_vault, then a system transfer refunding rent, then withdraw using the stale vault state.",
+          "expected": "Third instruction fails (closed/invalid discriminator); stale balance cannot be used."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "Manual-close idioms and unconstrained close receivers are pattern-detectable."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Needs a multi-instruction transaction on the local validator."
+          },
+          "formal": {
+            "level": "partial",
+            "note": "Kani can check the close function's postcondition on a modelled account struct; runtime GC is not modelled."
+          }
+        }
+      },
+      "detection_patterns": [
+        "\\*\\*\\s*[\\w\\.\\(\\)]+\\.lamports\\.borrow_mut\\(\\)\\s*=\\s*0",
+        "try_borrow_mut_lamports\\s*\\(\\s*\\)\\s*\\?\\s*=\\s*0",
+        "\\.assign\\s*\\(\\s*&?\\s*system_program::ID",
+        "\\.realloc\\s*\\(\\s*0\\s*,"
+      ],
+      "remediation": "Close accounts with Anchor's close constraint, or clear data and set the closed discriminator before transferring lamports.",
+      "references": [
+        "https://www.soldev.app/course/closing-accounts"
+      ]
+    },
+    {
+      "id": "SOL-14",
+      "name": "SPL Token Account Validation",
+      "category": "account_validation",
+      "severity": "critical",
+      "invariant_template": "Every token account used in a transfer/mint/burn MUST be validated for its mint, its owner/authority and the token program that owns it.",
+      "description": "A program accepts token accounts without checking that the mint matches the expected mint, that the token owner is the expected authority, or that the token program is the real SPL Token program. An attacker substitutes a worthless mint or a token account they control.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "#[account(token::mint = mint, token::authority = authority)] / associated_token::*; token_program: Program<'info, Token>",
+        "common_vuln": "Token accounts typed as AccountInfo/UncheckedAccount; missing token::mint or token::authority; unchecked token_program",
+        "formal_invariant": "forall transfer(src, dst, amt): src.mint == EXPECTED_MINT AND dst.mint == EXPECTED_MINT AND src.owner_auth == signer_or_pda AND token_program.key == spl_token::ID",
+        "anchor_checks": [
+          "Use Account<'info, TokenAccount> / InterfaceAccount<'info, TokenAccount>",
+          "Add token::mint and token::authority (or associated_token::mint/authority) constraints",
+          "Use Program<'info, Token> (or Token2022 via Interface) for the token program"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-14-1",
+            "rule": "Flag fields named *token*|*mint*|*vault*|*ata* typed AccountInfo/UncheckedAccount."
+          },
+          {
+            "id": "SR-14-2",
+            "rule": "Flag Account<'info, TokenAccount> fields in a struct used by a transfer handler that have neither token::mint nor an equivalent constraint."
+          },
+          {
+            "id": "SR-14-3",
+            "rule": "Flag token_program fields not typed Program<'info, Token>."
+          }
+        ],
+        "attacker_test": {
+          "name": "wrong_mint_token_account",
+          "setup": "Pool expects mint M. Mallory creates mint X and a funded token account of mint X.",
+          "attack": "Mallory calls deposit/swap passing her mint-X account in the mint-M slot.",
+          "expected": "Fails with ConstraintTokenMint (Anchor error 2014) or custom error; pool balances unchanged."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "Account types and constraints on token accounts are visible in the Accounts struct."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Create a second mint on the local validator and attempt substitution."
+          },
+          "formal": {
+            "level": "no",
+            "note": "Requires modelling SPL Token program state; Kani cannot execute it. Only the pure comparison logic can be modelled, which adds little."
+          }
+        }
+      },
+      "detection_patterns": [
+        "pub\\s+\\w*(?:token|mint|vault|ata)\\w*\\s*:\\s*(?:AccountInfo|UncheckedAccount)<'info>",
+        "pub\\s+token_program\\s*:\\s*(?:AccountInfo|UncheckedAccount)<'info>",
+        "Account<'info,\\s*TokenAccount>"
+      ],
+      "remediation": "Add token::mint / token::authority constraints and use Program<'info, Token> for the token program.",
+      "references": [
+        "https://www.soldev.app/course/token-extensions"
+      ]
+    },
+    {
+      "id": "SOL-15",
+      "name": "Arbitrary CPI / PDA Signer-Seeds Misuse",
+      "category": "cpi_safety",
+      "severity": "critical",
+      "invariant_template": "A CPI MUST only target a program whose ID is fixed or validated, and PDA signer seeds MUST be derived from program-controlled values, never attacker-supplied ones.",
+      "description": "The CPI target program or the seeds used with invoke_signed come from user input. An attacker redirects the call to a malicious program, or supplies seeds that make the program sign for a PDA it should not control, leading to privilege escalation or fund theft. Complements SOL-05 (program-id check) by covering signer seeds and call arguments.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "Program<'info, T>; CpiContext::new_with_signer with seeds built from constants and validated accounts",
+        "common_vuln": "invoke/invoke_signed with a user-supplied program AccountInfo; seeds taken from instruction data",
+        "formal_invariant": "forall cpi(target, seeds): target.key IN ALLOWED_PROGRAMS AND seeds == CANONICAL_SEEDS(validated_accounts) AND signer PDA == find_program_address(seeds)",
+        "anchor_checks": [
+          "Type the CPI program as Program<'info, T> or add address = EXPECTED_ID",
+          "Build signer seeds only from constants and fields of validated accounts",
+          "Verify the signing PDA with seeds + bump constraints (see SOL-03) before invoke_signed"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-15-1",
+            "rule": "Flag invoke/invoke_signed whose program argument originates from an AccountInfo/UncheckedAccount field."
+          },
+          {
+            "id": "SR-15-2",
+            "rule": "Flag CpiContext::new_with_signer / invoke_signed where any seed expression references instruction arguments."
+          },
+          {
+            "id": "SR-15-3",
+            "rule": "Flag Instruction { program_id: <account>.key() } constructed from an unvalidated account."
+          }
+        ],
+        "attacker_test": {
+          "name": "arbitrary_cpi_fake_program",
+          "setup": "Program performs a CPI to the token program from instruction 'payout'.",
+          "attack": "Mallory deploys a fake program with the same interface and passes it as the target program.",
+          "expected": "Fails with InvalidProgramId / IncorrectProgramId; the fake program is never invoked."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "CPI call sites and the provenance of program/seed expressions are syntactic."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Deploy a decoy program to the local validator and attempt the redirect."
+          },
+          "formal": {
+            "level": "no",
+            "note": "Kani cannot execute invoke/invoke_signed or syscalls. Only an abstract allowlist check on extracted logic can be proven; document as unverified surface."
+          }
+        }
+      },
+      "detection_patterns": [
+        "invoke(?:_signed)?\\s*\\(",
+        "CpiContext::new_with_signer\\s*\\(",
+        "(?:cpi_program|target_program|callee|program)\\w*\\s*:\\s*(?:AccountInfo|UncheckedAccount)<'info>"
+      ],
+      "remediation": "Pin CPI targets with Program<'info, T>, and derive signer seeds only from constants and validated accounts.",
+      "references": [
+        "https://www.soldev.app/course/arbitrary-cpi"
+      ]
+    },
+    {
+      "id": "SOL-16",
+      "name": "Unvalidated remaining_accounts",
+      "category": "account_validation",
+      "severity": "high",
+      "invariant_template": "Every account read from ctx.remaining_accounts MUST be validated (owner, type, signer/writable flags, expected key or derivation) as strictly as a declared account.",
+      "description": "Anchor's declared accounts are validated automatically, but remaining_accounts are raw AccountInfos. Handlers that iterate them and read/write data or transfer lamports without checks let an attacker smuggle arbitrary accounts into privileged logic.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "None automatic; use manual Account::try_from(&ai) plus key/owner/seeds checks, or declare accounts explicitly",
+        "common_vuln": "for ai in ctx.remaining_accounts { ... } with no owner/key/signer validation",
+        "formal_invariant": "forall ai in remaining_accounts used by handler: validated(ai) where validated = owner(ai)==EXPECTED_OWNER AND disc(ai)==DISC(T) AND key(ai)==EXPECTED_KEY(ctx) AND (needs_signer => ai.is_signer)",
+        "anchor_checks": [
+          "Prefer declaring accounts in the Accounts struct over remaining_accounts",
+          "Convert with Account::<T>::try_from(ai) (owner + discriminator)",
+          "Compare ai.key() with an expected or derived address; check is_signer / is_writable as needed",
+          "Bound the number of remaining accounts and reject duplicates"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-16-1",
+            "rule": "Flag any use of ctx.remaining_accounts."
+          },
+          {
+            "id": "SR-16-2",
+            "rule": "Escalate to high when an element is used for lamports/data mutation or as a CPI account without a preceding key/owner check."
+          },
+          {
+            "id": "SR-16-3",
+            "rule": "Flag loops over remaining_accounts with no duplicate-key check."
+          }
+        ],
+        "attacker_test": {
+          "name": "remaining_accounts_smuggling",
+          "setup": "Handler 'distribute' pays every account in remaining_accounts a fixed share.",
+          "attack": "Mallory appends her own account (and a duplicate of a legitimate recipient) to remaining_accounts.",
+          "expected": "Instruction fails on key/owner/duplicate validation, or Mallory receives nothing."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "remaining_accounts usage is trivially detectable; validation presence is checked by rule."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Attacker appends crafted accounts; assert rejection / no payout."
+          },
+          "formal": {
+            "level": "partial",
+            "note": "If the per-account validation loop is extracted into pure logic, Kani can prove no unvalidated element is consumed."
+          }
+        }
+      },
+      "detection_patterns": [
+        "\\bremaining_accounts\\b",
+        "ctx\\.remaining_accounts\\.iter\\s*\\(\\s*\\)",
+        "remaining_accounts\\s*\\[\\s*\\w+\\s*\\]"
+      ],
+      "remediation": "Declare accounts explicitly, or validate every remaining account's owner, discriminator, key and signer flags before use.",
+      "references": [
+        "https://www.soldev.app/course/remaining-accounts"
+      ]
+    },
+    {
+      "id": "SOL-17",
+      "name": "Lamport Conservation & Rent-Exemption",
+      "category": "economic",
+      "severity": "high",
+      "invariant_template": "Instruction execution MUST conserve total lamports (no creation/destruction by program logic) and every non-closed program-owned account MUST remain rent-exempt.",
+      "description": "Direct lamport manipulation (borrow_mut_lamports) can mint or burn value, drop accounts below the rent-exempt minimum, or make the instruction fail at runtime sanity checks. Incorrect accounting lets an attacker drain a vault or leave accounts that the runtime later purges.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "#[account(mut, rent_exempt = enforce)]; prefer system_program::transfer CPIs over raw lamport edits",
+        "common_vuln": "Manual lamport arithmetic; withdraw leaving account below rent minimum; unchecked sub on lamports",
+        "formal_invariant": "SUM(lamports_before over touched accounts) == SUM(lamports_after) AND forall acct not closed: lamports_after(acct) >= Rent::minimum_balance(acct.data_len)",
+        "anchor_checks": [
+          "Use system_program::transfer for SOL moves where the source is system-owned; use checked_sub/checked_add for program-owned lamport edits",
+          "After mutation assert source lamports >= Rent::get()?.minimum_balance(data_len)",
+          "Add rent_exempt = enforce constraint on mutable program accounts"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-17-1",
+            "rule": "Flag direct lamports.borrow_mut() / try_borrow_mut_lamports() edits."
+          },
+          {
+            "id": "SR-17-2",
+            "rule": "Flag lamport arithmetic using unchecked +/-/ += / -= operators."
+          },
+          {
+            "id": "SR-17-3",
+            "rule": "Flag handlers that reduce a program-owned account's lamports with no Rent::minimum_balance comparison."
+          }
+        ],
+        "attacker_test": {
+          "name": "withdraw_below_rent_exempt",
+          "setup": "Vault funded with rent-minimum + 1000 lamports.",
+          "attack": "Mallory (or Alice) withdraws rent-minimum + 1000 (full amount) and in a second case amount causing underflow.",
+          "expected": "Withdraw capped/rejected so lamports >= rent minimum; sum of lamports before == after; no underflow panic escapes as state corruption."
+        },
+        "verification": {
+          "static": {
+            "level": "partial",
+            "note": "Raw lamport edits and unchecked arithmetic are detectable; whether accounting is correct is not."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Compare balances before/after on the local validator and test rent boundary values."
+          },
+          "formal": {
+            "level": "yes",
+            "note": "Conservation of a sum over modelled account lamport fields is a strong Kani/bounded-model target."
+          }
+        }
+      },
+      "detection_patterns": [
+        "lamports\\.borrow_mut\\(\\)",
+        "try_borrow_mut_lamports\\s*\\(",
+        "\\*\\*[^;\\n]*lamports[^;\\n]*(?:\\+=|-=|=\\s*[^=])"
+      ],
+      "remediation": "Use checked arithmetic, prefer transfer CPIs, and assert rent-exempt minimum after every lamport mutation.",
+      "references": [
+        "https://www.soldev.app/course/rent"
+      ]
+    },
+    {
+      "id": "SOL-18",
+      "name": "Account Realloc / Data-Size Integrity",
+      "category": "state_integrity",
+      "severity": "medium",
+      "invariant_template": "Any change to an account's data length MUST be authorized, bounded (<= MAX_PERMITTED_DATA_INCREASE per instruction and 10 MiB total), funded for rent, and leave all stored fields consistent with the new length.",
+      "description": "Unchecked realloc or a mismatch between declared space and the serialized struct size lets an attacker grow accounts to exhaust payer funds, shrink accounts to truncate state, or trigger deserialization of stale/garbage bytes.",
+      "target_neutral": false,
+      "annotations": {
+        "anchor_constraint": "#[account(mut, realloc = new_len, realloc::payer = payer, realloc::zero = true)]; #[derive(InitSpace)] for space",
+        "common_vuln": "Manual realloc without payer/rent top-up; realloc::zero = false when shrinking then growing; hard-coded space not matching struct",
+        "formal_invariant": "forall realloc(acct, n): signer is acct authority AND n <= data_len + 10240 AND n >= MIN_STRUCT_LEN AND lamports(acct) >= rent_min(n) AND bytes beyond old_len are zeroed",
+        "anchor_checks": [
+          "Use realloc constraints with payer and zero = true",
+          "Derive space from #[derive(InitSpace)] rather than literals",
+          "Restrict who may realloc (has_one = authority)",
+          "Bound dynamic Vec/String sizes with explicit max lengths"
+        ],
+        "static_rules": [
+          {
+            "id": "SR-18-1",
+            "rule": "Flag AccountInfo::realloc / resize calls outside an Anchor realloc constraint."
+          },
+          {
+            "id": "SR-18-2",
+            "rule": "Flag realloc::zero = false."
+          },
+          {
+            "id": "SR-18-3",
+            "rule": "Flag space = <integer literal> on structs containing Vec/String (space may not fit)."
+          }
+        ],
+        "attacker_test": {
+          "name": "realloc_abuse_and_truncation",
+          "setup": "Account with a list field supports append (realloc grow).",
+          "attack": "Mallory (non-authority) triggers realloc; separately a call requests growth beyond 10240 bytes and a shrink below the struct minimum.",
+          "expected": "Non-authority rejected; oversize and undersize requests fail; surviving data deserializes consistently."
+        },
+        "verification": {
+          "static": {
+            "level": "yes",
+            "note": "Realloc call sites and constraint flags are syntactic."
+          },
+          "dynamic": {
+            "level": "yes",
+            "note": "Grow/shrink/boundary cases on the local validator."
+          },
+          "formal": {
+            "level": "partial",
+            "note": "Size arithmetic and bounds (no overflow, <= limits) are provable on extracted logic; runtime realloc semantics are not modelled."
+          }
+        }
+      },
+      "detection_patterns": [
+        "\\.realloc\\s*\\(",
+        "\\.resize\\s*\\(",
+        "realloc::zero\\s*=\\s*false",
+        "space\\s*=\\s*\\d+"
+      ],
+      "remediation": "Use Anchor realloc constraints with payer and zero=true, derive space via InitSpace, and restrict reallocation to the authority.",
+      "references": [
+        "https://www.anchor-lang.com/docs/account-constraints"
+      ]
     }
-  ]
+  ],
+  "default_selection": {
+    "enabled_by_default": [
+      "SOL-01",
+      "SOL-02",
+      "SOL-03",
+      "SOL-04",
+      "SOL-05",
+      "SOL-06",
+      "SOL-07",
+      "SOL-08",
+      "SOL-09",
+      "SOL-11",
+      "SOL-12",
+      "SOL-13",
+      "SOL-14",
+      "SOL-15",
+      "SOL-16",
+      "SOL-17",
+      "SOL-18"
+    ],
+    "opt_in": [
+      "SOL-10"
+    ],
+    "decided": "2026-11-11",
+    "rationale": "SOL-10 has the weakest verification coverage (static: partial, dynamic: partial, formal: no) and stays opt-in until a mock-CPI test harness improves it.",
+    "rules": [
+      "Run static and dynamic checks wherever the property supports them.",
+      "Run Kani only for properties whose formal rating is yes or partial.",
+      "Report runtime-dependent checks that cannot be verified as unverified_surface; never overclaim verification."
+    ]
+  }
 }
