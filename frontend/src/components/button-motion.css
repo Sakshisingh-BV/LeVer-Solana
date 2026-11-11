@@ -1,65 +1,80 @@
-/* Diagonal-fill hover adapted from Uiverse.io by vikiWayne.
-   Scoped to action buttons and CTA links; existing sizing and type are retained. */
-.site-shell :is(.button, .nav-cta) {
+/* Two-sided skew fill adapted from Uiverse.io by nikk7007.
+   Only page-navigation CTA links; action controls and in-page anchors keep their existing styles. */
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]) {
+  --button-fill: #00a97f;
+  --button-fill-ink: rgb(10, 25, 30);
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  outline: 2px solid transparent;
-  outline-offset: 0;
-  transition: color 1000ms ease, transform 1000ms ease,
-    outline-color 1000ms ease, border-color 1000ms ease,
-    background-color 1000ms ease, box-shadow 1000ms ease;
+  transition: color .5s ease, background-color .5s ease,
+    border-color .5s ease, box-shadow .5s ease, transform .5s ease,
+    filter .5s ease;
 }
 
-.site-shell :is(.button, .nav-cta)::before {
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"])::before,
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"])::after {
   content: '';
+  display: block;
   position: absolute;
-  left: -50px;
-  top: 0;
-  width: 0;
+  top: 50%;
+  left: 25%;
+  width: 100%;
   height: 100%;
   z-index: -1;
   pointer-events: none;
-  background: #237a4b;
-  transform: skewX(45deg);
-  transition: width 1000ms ease;
+  background: var(--button-fill);
+  transform: skew(90deg) translate(-50%, -50%);
+  transition: transform .5s ease-out;
 }
 
-.site-shell :is(.button, .nav-cta):not(:disabled):focus-visible {
-  color: #fff;
-  outline-color: #74e5b1;
-  border-color: #74e5b1;
-  box-shadow: 4px 5px 17px -4px #26834f;
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"])::before {
+  top: -50%;
+  left: -25%;
+  transform: skew(90deg) rotate(180deg) translate(-50%, -50%);
 }
 
-.site-shell :is(.button, .nav-cta):not(:disabled):focus-visible::before {
-  width: 250%;
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):focus-visible {
+  color: var(--button-fill-ink);
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):focus-visible::before {
+  transform: skew(45deg) rotate(180deg) translate(-50%, -50%);
+}
+
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):focus-visible::after {
+  transform: skew(45deg) translate(-50%, -50%);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .site-shell :is(.button, .nav-cta):not(:disabled):hover {
-    color: #fff;
-    transform: scale(1.1);
-    outline-color: #74e5b1;
-    border-color: #74e5b1;
-    box-shadow: 4px 5px 17px -4px #26834f;
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):hover {
+    color: var(--button-fill-ink);
+    border-color: var(--button-fill);
+    transform: none;
   }
 
-  .site-shell :is(.button, .nav-cta):not(:disabled):hover::before {
-    width: 250%;
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):hover::before {
+    transform: skew(45deg) rotate(180deg) translate(-50%, -50%);
+  }
+
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):hover::after {
+    transform: skew(45deg) translate(-50%, -50%);
   }
 }
 
-.site-shell :is(.button, .nav-cta):not(:disabled):active {
+#root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]):not([aria-disabled="true"]):active {
+  filter: brightness(.7);
   transform: scale(.98);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .site-shell :is(.button, .nav-cta),
-  .site-shell :is(.button, .nav-cta)::before {
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]),
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"])::before,
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"])::after {
     transition: none !important;
     animation: none !important;
   }
 
-  .site-shell :is(.button, .nav-cta) { transform: none !important; }
+  #root a:is(.button, .nav-cta):not([href^="#"], [href^="/#"]) { transform: none !important; }
 }

@@ -12,7 +12,7 @@
 html { scroll-behavior: smooth; scroll-padding-top: 110px; }
 body { background: var(--page); }
 .site-shell { position: relative; isolation: isolate; overflow: clip; }
-.site-header { position: sticky; top: 0; z-index: 50; height: 86px; background: #090e0cc9; backdrop-filter: blur(22px); border-bottom: 1px solid #d3ffe512; }
+.site-header { position: sticky; top: 0; z-index: 50; height: 86px; background: #090e0ce8; border-bottom: 1px solid #d3ffe512; }
 .nav-container { max-width: 1320px; height: 100%; margin: auto; padding: 0 48px; display: flex; justify-content: space-between; align-items: center; gap: 32px; }
 .lever-logo { display: inline-flex; align-items: center; gap: 10px; color: #f2f8f4; }
 .lever-logo svg { width: 29px; height: 29px; color: var(--accent); }
@@ -48,14 +48,14 @@ body { background: var(--page); }
 .hero-ecosystems > span:first-child { font-size: 8px; letter-spacing: 1.4px; color: #708e7d; }
 .hero-ecosystems > .ecosystem-divider { height: 14px; width: 1px; background: #bddac825; margin: 0 -6px; }
 .hero-visual { position: relative; width: 100%; max-width: 470px; justify-self: end; padding-top: 14px; transform: perspective(1600px) rotateY(-5deg) rotateZ(-1deg); }
-.intent-card { display: flex; align-items: center; gap: 16px; width: 88%; margin: 0 0 0 auto; padding: 19px 21px; background: #13261acf; backdrop-filter: blur(14px); border: 1px solid #b1edcb25; border-radius: 10px; box-shadow: 0 12px 60px #00000020; }
+.intent-card { display: flex; align-items: center; gap: 16px; width: 88%; margin: 0 0 0 auto; padding: 19px 21px; background: #13261acf; backdrop-filter: blur(8px); border: 1px solid #b1edcb25; border-radius: 10px; box-shadow: 0 12px 60px #00000020; }
 .visual-icon { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 8px; border: 1px solid #a9edc524; background: #81dba512; color: #96e9b5; }
 .intent-card > div > span { font-size: 8px; letter-spacing: 1.7px; color: #7abf94; }
 .intent-card p { font-size: 12px; line-height: 1.7; margin-top: 5px; color: #c9e0d2; }
 .visual-connector { height: 56px; display: flex; flex-direction: column; align-items: center; color: #b2f4cb7d; margin-left: 44%; width: 34px; }
 .visual-connector span { flex: 1; width: 1px; background: #9cefc13d; }
 .visual-connector svg { margin-block: 4px; }
-.hero-code-card { border: 1px solid #b0f8ce30; border-radius: 11px; background: #0c1915ed; backdrop-filter: blur(18px); box-shadow: 0 30px 80px #020b0866; overflow: hidden; }
+.hero-code-card { border: 1px solid #b0f8ce30; border-radius: 11px; background: #0c1915ed; backdrop-filter: blur(8px); box-shadow: 0 30px 80px #020b0866; overflow: hidden; }
 .hero-code-title { display: flex; align-items: center; gap: 20px; height: 45px; padding: 0 18px; border-bottom: 1px solid #b4fbd013; background: #deffe904; color: #a7c0b2; font: 10px Consolas, monospace; }
 .window-dots { display: flex; gap: 5px; }
 .window-dots i { width: 6px; height: 6px; border-radius: 50%; background: #567365; }

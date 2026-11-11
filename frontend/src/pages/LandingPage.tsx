@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import type { CSSProperties } from 'react';
 import { ArrowDown, ArrowRight, ArrowUpRight, Braces, Check, Code2, FileCheck2, FileText, GitBranch, MessageSquareText, ShieldCheck, Sparkles } from 'lucide-react';
 import NewRunPage from './NewRunPage';
 import { TargetIcon } from '../components/ui';
@@ -35,8 +36,18 @@ export default function LandingPage(props: { onRun: (input: RunInput) => void; n
     </div></div>
     <div className="hero-bottom"><span><ShieldCheck size={14}/>Built around generation, verification & repair</span><Link to="/#about">DISCOVER WHAT'S POSSIBLE<ArrowDown size={14}/></Link><span className="hero-index">01 — THE POSSIBILITIES</span></div></section>
     <div className="landing-sections">
-      <section className="about-section section-container" id="about"><div className="section-heading"><span className="section-kicker"><span/>MEET LEVER</span><div className="section-heading-row"><h2>What is LeVer?</h2><span className="small-section-note">LESS FRICTION.<br/>MORE POSSIBILITY.</span></div><p>LeVer is an AI-driven smart contract generation and vulnerability repair framework that translates natural language requirements into smart contract code. It combines language-model-based reasoning with formal methods to help generate, analyze and improve smart contracts.</p></div><div className="feature-grid">{features.map(feature => <article className="feature-card" key={feature.number}><div className="feature-card-top"><span className="feature-icon"><feature.icon size={22}/></span><span>{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.copy}</p></article>)}</div></section>
-      <section className="how-section section-container" id="how-it-works"><div className="section-heading"><span className="section-kicker"><span/>A CONNECTED WORKFLOW</span><h2>One idea. A clear path forward.</h2><p>From the first sentence to the final source file, every step has a purpose.</p></div><ol className="landing-workflow">{steps.map((step, index) => <li key={step.title}><div className="workflow-node"><step.icon size={22}/><span>{String(index + 1).padStart(2, '0')}</span></div><h3>{step.title}</h3><p>{step.copy}</p></li>)}</ol><div className="workflow-footnote"><Check size={14}/>Execution follows your selected mode and the capabilities of your connected pipeline.</div></section>
+      <section className="about-section section-container" id="about"><div className="section-heading"><span className="section-kicker"><span/>MEET LEVER</span><div className="section-heading-row"><h2>What is LeVer?</h2><span className="small-section-note">LESS FRICTION.<br/>MORE POSSIBILITY.</span></div><p>LeVer is an AI-driven code generation and vulnerability repair framework that translates natural language requirements into verifiable blockchain code (Solidity contracts and Solana programs). It combines language-model-based reasoning with formal methods to help generate, analyze and improve on-chain code.</p></div><div className="feature-grid">{features.map(feature => <article className="feature-card" key={feature.number}><div className="feature-card-top"><span className="feature-icon"><feature.icon size={22}/></span><span>{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.copy}</p></article>)}</div></section>
+      <section className="how-section section-container" id="how-it-works">
+        <div className="section-heading"><span className="section-kicker"><span/>A CONNECTED WORKFLOW</span><h2>One idea. A clear path forward.</h2><p>From the first sentence to the final source file, every step has a purpose.</p></div>
+        <ol className="landing-workflow">
+          {steps.map((step, index) => <li key={step.title} style={{ '--step-index': index } as CSSProperties}>
+            {index < steps.length - 1 && <span className="workflow-connector" aria-hidden="true"/>}
+            <div className="workflow-node"><step.icon size={22} aria-hidden="true"/><span>{String(index + 1).padStart(2, '0')}</span></div>
+            <h3>{step.title}</h3><p>{step.copy}</p>
+          </li>)}
+        </ol>
+        <div className="workflow-footnote"><Check size={14}/>Execution follows your selected mode and the capabilities of your connected pipeline.</div>
+      </section>
       <section className="builder-section section-container" id="build"><NewRunPage {...props} embedded/></section>
       <section className="closing-section section-container"><span className="section-kicker"><span/>BUILT FOR THE NEXT IDEA</span><h2>Make your next move<br/><span>an on-chain one.</span></h2><Link to="/#build" className="button primary">Start building<ArrowRight size={17}/></Link><a className="closing-source" href="https://github.com/gl-bowei/LeVer" target="_blank" rel="noreferrer">Explore the open-source framework<ArrowUpRight size={14}/></a></section>
     </div>

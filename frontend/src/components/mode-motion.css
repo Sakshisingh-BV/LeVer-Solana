@@ -35,8 +35,7 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: #17171733;
-  backdrop-filter: blur(50px);
+  background: radial-gradient(ellipse at center, #387ef026, #17171766 70%);
   opacity: 0;
   transition: opacity 300ms ease;
 }
@@ -55,13 +54,12 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 5px;
-  height: 50px;
+  width: 110px;
+  height: 150px;
   z-index: -1;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  background: #fff;
-  filter: blur(50px);
+  background: radial-gradient(ellipse, #ffffff18, #ffffff00 70%);
   opacity: 0;
   transition: opacity 300ms ease;
 }

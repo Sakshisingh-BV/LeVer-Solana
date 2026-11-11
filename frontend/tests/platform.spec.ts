@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 test('landing page renders the actual WebGL scene and navigates to the builder', async ({ page }) => {
+  // This rendering check should not depend on a locally running generation service.
+  await page.route('**/api/health', route => route.fulfill({ json: { llm: { model: 'test' } } }));
+  await page.route('**/api/capabilities', route => route.fulfill({ json: { targets: [] } }));
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -13,13 +16,14 @@ test('landing page renders the actual WebGL scene and navigates to the builder',
   await page.screenshot({ path: '.qa/desktop-home.png' });
   await page.getByRole('link', { name: 'Get Started', exact: true }).click();
   await expect(page).toHaveURL(/#build$/);
-  await expect(page.getByRole('heading', { name: 'Your next contract starts here.' })).toBeInViewport();
+  await expect(page.getByRole('heading', { name: 'Your next build starts here.' })).toBeInViewport();
   expect(errors).toEqual([]);
 });
 
-test('builder validates input, preserves ecosystem and mode, and reports absent backend honestly', async ({ page }) => {
+test('builder validates input, preserves ecosystem and mode, and reports an unreachable backend honestly', async ({ page }) => {
+  await page.route('**/api/runs', route => route.abort('connectionrefused'));
   await page.goto('/build');
-  await page.getByRole('button', { name: 'Generate Smart Contract' }).click();
+  await page.getByRole('button', { name: 'Generate Code' }).click();
   await expect(page.getByRole('alert')).toContainText('Describe what');
   await page.getByRole('button', { name: /Solana Rust/ }).click();
   await page.getByRole('button', { name: 'No Lean Generation without the Lean verification path.' }).click();
@@ -29,8 +33,8 @@ test('builder validates input, preserves ecosystem and mode, and reports absent 
   await page.getByRole('button', { name: /Solana Rust/ }).click();
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   await page.screenshot({ path: '.qa/desktop-builder.png', fullPage: true });
-  await page.getByRole('button', { name: 'Generate Smart Contract' }).click();
-  await expect(page.getByRole('alert')).toContainText('Backend not connected');
+  await page.getByRole('button', { name: 'Generate Code' }).click();
+  await expect(page.getByRole('alert')).toContainText('Could not reach the generation service');
   await expect(page.locator('.detail-meta')).toContainText('Solana');
   await expect(page.locator('.detail-meta')).toContainText('no_lean');
   await expect(page.getByText('No source files yet', { exact: true })).toBeVisible();
@@ -92,6 +96,24 @@ test('HTTP adapter forwards the exact selections and consumes real streamed stag
   expect(payload).toMatchObject({ target: 'solana', mode: 'no_lean', requirement: 'Test requirement' });
   expect(result.stages).toEqual(['Code Generation']);
   expect(result.result.files[0].language).toBe('rust');
+});
+
+test('HTTP adapter follows a run handle to the NDJSON event stream (FastAPI contract)', async ({ page }) => {
+  await page.goto('/build');
+  await page.route('**/__test_runs', route => route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ run_id: 'run-1', status: 'queued', events_url: '/__test_runs/run-1/events' }) }));
+  await page.route('**/__test_runs/run-1/events', route => route.fulfill({ contentType: 'application/x-ndjson', body: [
+    JSON.stringify({ type: 'progress', stage: 'Queued' }),
+    JSON.stringify({ type: 'heartbeat' }),
+    JSON.stringify({ type: 'progress', stage: 'Generate', log: { level: 'info', message: '1. Generating Solidity from requirement...' } }),
+    JSON.stringify({ type: 'result', result: { files: [{ path: 'Target.sol', language: 'solidity', content: 'contract T {}' }], verification: { status: 'failed', checks: [{ name: 'Lean', status: 'failed' }] } } }),
+  ].join('\n') + '\n' }));
+  const outcome = await page.evaluate(async () => {
+    const path = '/src/lib/generation.ts'; const { createHttpAdapter } = await import(/* @vite-ignore */ path);
+    const stages: string[] = []; let runId = '';
+    const result = await createHttpAdapter('/__test_runs').generate({ name: 'Test', requirement: 'Test', target: 'solidity', mode: 'full', maxIterations: 3, attackRounds: 3 }, { signal: new AbortController().signal, onProgress: (event: { stage: string }) => stages.push(event.stage), onRunId: (id: string) => { runId = id; } });
+    return { stages, runId, status: result.verification.status };
+  });
+  expect(outcome).toEqual({ stages: ['Queued', 'Generate'], runId: 'run-1', status: 'failed' });
 });
 
 test('HTTP adapter rejects wrong-ecosystem source and empty streams', async ({ page }) => {

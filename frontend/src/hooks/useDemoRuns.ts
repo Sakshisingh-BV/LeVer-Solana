@@ -42,12 +42,22 @@ export function useDemoRuns() {
   }, [runs]);
   useEffect(() => {
     if (!isRunning) return;
-    const timer = window.setInterval(() => setRuns(current => current.map(run => {
-      if (run.status !== 'running') return run;
-      const stage = run.stage + 1;
-      return { ...run, stage, status: stage >= stagesFor(run.mode).length ? 'completed' : 'running' };
-    })), 1350);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    const onVisibility = () => {
+      window.clearInterval(timer);
+      if (document.hidden) return;
+      timer = window.setInterval(() => {
+        if (document.hidden) return;
+        setRuns(current => current.some(run => run.status === 'running') ? current.map(run => {
+          if (run.status !== 'running') return run;
+          const stage = run.stage + 1;
+          return { ...run, stage, status: stage >= stagesFor(run.mode).length ? 'completed' : 'running' };
+        }) : current);
+      }, 2000);
+    };
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
   }, [isRunning]);
   function startRun(input: RunInput) {
     const run: Run = { ...input, id: crypto.randomUUID(), createdAt: new Date().toISOString(), status: 'running', stage: 0, isDemo: true };

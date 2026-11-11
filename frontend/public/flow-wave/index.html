@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#02160c">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <title>LeVer · Flow Wave</title>
   <style>
     html,body{margin:0;padding:0;background:#000}#scene{position:fixed;inset:0;width:100vw;height:100vh;display:block}
@@ -16,14 +17,14 @@
 <body>
 <canvas id="scene" aria-label="Emerald particle hills flowing under a drifting atmosphere"></canvas><div id="fallback"></div><div id="scroll-host"></div><div id="scroll-hint">scroll ↓</div>
 <script type="module">
+import { createAmbientLoop } from '../ambient-loop.js';
 const embedded = new URLSearchParams(location.search).has('embed');
 document.documentElement.classList.toggle('embedded', embedded);
 try {
 const THREE = await import('three');
-const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { ShaderPass }, { GammaCorrectionShader }, { CopyShader }] = await Promise.all([
+const [{ EffectComposer }, { RenderPass }, { ShaderPass }] = await Promise.all([
   import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
-  import('three/addons/postprocessing/UnrealBloomPass.js'), import('three/addons/postprocessing/ShaderPass.js'),
-  import('three/addons/shaders/GammaCorrectionShader.js'), import('three/addons/shaders/CopyShader.js'),
+  import('three/addons/postprocessing/ShaderPass.js'),
 ]);
 const bgColor       = '#02160c'   // FinalPass background tint
 const flameColor    = '#0aff7f'   // corner-flame A
@@ -56,24 +57,18 @@ function hexToVec3(hex) {
   return new THREE.Vector3(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 }
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGL1Renderer({ canvas, antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
+const renderer = new THREE.WebGL1Renderer({ canvas, antialias: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000); scene.fog = new THREE.Fog(0x000000, 0, 15);
 const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400); camera.position.set(0, 7, 16);
-const LAYERS = { NONE: 0, TORUS_SCENE: 1, BLOOM_SCENE: 2, ENTIRE_SCENE: 3 };
-camera.layers.enable(LAYERS.TORUS_SCENE); camera.layers.enable(LAYERS.BLOOM_SCENE); camera.layers.enable(LAYERS.ENTIRE_SCENE); scene.add(camera);
+scene.add(camera);
 const renderPass = new RenderPass(scene, camera);
-const torusComposer = new EffectComposer(renderer); torusComposer.renderToScreen = false;
-torusComposer.addPass(renderPass); torusComposer.addPass(new ShaderPass(GammaCorrectionShader));
-torusComposer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.22, 0.2, 0)); torusComposer.addPass(new ShaderPass(CopyShader));
-const bloomComposer = new EffectComposer(renderer); bloomComposer.renderToScreen = false;
-bloomComposer.addPass(renderPass); bloomComposer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.55, 0)); bloomComposer.addPass(new ShaderPass(GammaCorrectionShader));
+// Points already draw their own soft glow; the old bloom layers contained no objects.
 const finalComposer = new EffectComposer(renderer); finalComposer.addPass(renderPass);
 const finalPass = new ShaderPass({
-  uniforms: { iTime: { value: 0 }, tDiffuse: { value: null }, torusTexture: { value: null }, bloomTexture: { value: null }, haloTexture: { value: null }, uBg: { value: hexToVec3(bgColor) }, uFlameA: { value: hexToVec3(flameColor) }, uFlameB: { value: hexToVec3(flameColor2) }, uFlameAmt: { value: flameAmt } },
+  uniforms: { iTime: { value: 0 }, tDiffuse: { value: null }, uBg: { value: hexToVec3(bgColor) }, uFlameA: { value: hexToVec3(flameColor) }, uFlameB: { value: hexToVec3(flameColor2) }, uFlameAmt: { value: flameAmt } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position, 1.0); }`,
-  fragmentShader: `uniform float iTime; uniform sampler2D tDiffuse; uniform sampler2D bloomTexture; uniform sampler2D torusTexture; uniform sampler2D haloTexture;
+  fragmentShader: `uniform float iTime; uniform sampler2D tDiffuse;
 uniform vec3 uBg; uniform vec3 uFlameA; uniform vec3 uFlameB; uniform float uFlameAmt;
 varying vec2 vUv;
 vec3 warp3d(vec3 pos, float t){ float curv=.8,a=1.9,b=0.7; pos*=2.;
@@ -88,12 +83,9 @@ void main(){
   flame *= smoothstep(0.25, 1., abs(uv.y));
   float md = smoothstep(-0.7, 1., -uv.y*uv.x); flame *= md*md;
   vec3 bg = uBg * (1.0 - 0.4 * length(uv));
-  vec3 halo = texture2D(haloTexture, vUv).xyz;
-  gl_FragColor = vec4(bg + flame*uFlameAmt + texture2D(bloomTexture, vUv).xyz + texture2D(torusTexture, vUv).xyz + texture2D(tDiffuse, vUv).xyz + halo, 1.);
+  gl_FragColor = vec4(bg + flame*uFlameAmt + texture2D(tDiffuse, vUv).xyz, 1.);
 }`,
 });
-finalPass.uniforms.bloomTexture.value = bloomComposer.renderTarget1.texture;
-finalPass.uniforms.torusTexture.value = torusComposer.renderTarget1.texture;
 finalComposer.addPass(finalPass);
 const SNOISE = `vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
 vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
@@ -165,8 +157,11 @@ void main() {
   gl_FragColor = vec4(vColor * uBrightness, vFade * a * uOpacity * uAppear);
 }`,
 });
-const points = new THREE.Points(new THREE.SphereGeometry(4.2, 200, 600), material);
-points.frustumCulled = false; points.layers.enable(LAYERS.ENTIRE_SCENE);
+const waveGeometry = new THREE.SphereGeometry(4.2, 100, 200);
+// Render each point once; triangle indices repeat vertices up to six times.
+waveGeometry.setIndex(null);
+const points = new THREE.Points(waveGeometry, material);
+points.frustumCulled = false;
 const group = new THREE.Group(); group.add(points); scene.add(group);
 let atmoMat;
 (() => {
@@ -178,7 +173,7 @@ let atmoMat;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1)); geometry.setAttribute('seed', new THREE.BufferAttribute(seeds, 1));
   atmoMat = new THREE.ShaderMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-    uniforms: { uTime: { value: 0 }, uColor: { value: hexToVec3(atmoColor) }, uRes: { value: new THREE.Vector2(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio) } },
+    uniforms: { uTime: { value: 0 }, uColor: { value: hexToVec3(atmoColor) }, uRes: { value: new THREE.Vector2() } },
     vertexShader: `attribute float size; attribute float seed; uniform float uTime; uniform vec2 uRes;
 varying float vA;
 vec3 warp(vec3 p, float t){ float c=0.9,a=1.9,b=0.02,s=0.05; p*=2.;
@@ -196,7 +191,7 @@ void main(){
 void main(){ vec2 p = gl_PointCoord - 0.5; float l = length(p); if (l > 0.5) discard;
   float tex = smoothstep(0.5, 0.0, l); gl_FragColor = vec4(uColor * tex, tex * vA * 0.6); }`,
   });
-  const pts = new THREE.Points(geometry, atmoMat); pts.frustumCulled = false; pts.layers.enable(LAYERS.ENTIRE_SCENE); scene.add(pts);
+  const pts = new THREE.Points(geometry, atmoMat); pts.frustumCulled = false; scene.add(pts);
   pts.onBeforeRender = () => { const t = performance.now() / 1000; atmoMat.uniforms.uTime.value = t * atmoSpeed * 8.0; pts.position.copy(camera.position); finalPass.uniforms.iTime.value = t; };
 })();
 let scrollTarget = 0, scrollSmooth = 0, scrollCurrent = 0;
@@ -221,10 +216,9 @@ window.addEventListener('scroll', updateScroll, { passive: true });
 window.addEventListener('mousemove', event => { mouseTarget.x = (event.clientX / innerWidth) * 2 - 1; mouseTarget.y = -((event.clientY / innerHeight) * 2 - 1); POINTER.active = true; POINTER.lastMove = performance.now(); }, { passive: true });
 window.addEventListener('mouseout', event => { if (!event.relatedTarget) POINTER.active = false; });
 const sceneObj = {
-  stream: 0, appearStart: performance.now(), t0: performance.now() / 1000,
-  render(scroll, m) {
-const t = performance.now() / 1000
-const dt = Math.min(0.05, t - this.t0); this.t0 = t
+  stream: 0, appearStart: performance.now(),
+  render(scroll, m, now, dt) {
+const t = now / 1000
 uniforms.uTime.value = t
 
 // Stream the hills toward us at a constant rate; grow the swell with scroll.
@@ -249,40 +243,33 @@ const elapsed = (performance.now() - this.appearStart) / 1000
 uniforms.uAppear.value = Math.max(0, Math.min(1, (elapsed - 0.2) / 1.4))   // 0.2s delay, 1.4s fade-in
   },
 };
-let frame = 0, paused = false, disposed = false;
-const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-function render() {
-  frame = 0; if (disposed || document.hidden || paused) return;
+let paused = embedded, contextLost = false;
+function render(now, dt, reduced) {
   scrollSmooth = Lerp(scrollSmooth, scrollTarget, 0.10); scrollCurrent = Lerp(scrollCurrent, scrollSmooth, 0.06);
   mouse.x = Lerp(mouse.x, mouseTarget.x, 0.06); mouse.y = Lerp(mouse.y, mouseTarget.y, 0.06);
-  sceneObj.render(scrollCurrent, mouse);
-  if (reducedMotion.matches) uniforms.uAppear.value = 1;
-  camera.layers.set(LAYERS.TORUS_SCENE); torusComposer.render();
-  camera.layers.set(LAYERS.BLOOM_SCENE); bloomComposer.render();
-  camera.layers.set(LAYERS.ENTIRE_SCENE); finalComposer.render();
-  if (!reducedMotion.matches) frame = requestAnimationFrame(render);
+  sceneObj.render(scrollCurrent, mouse, now, dt);
+  if (reduced) uniforms.uAppear.value = 1;
+  finalComposer.render();
 }
-function wake() { if (!frame && !disposed && !document.hidden && !paused) { sceneObj.t0 = performance.now() / 1000; frame = requestAnimationFrame(render); } }
+const loop = createAmbientLoop(render, { paused });
 function resize() {
-  const w = innerWidth, h = innerHeight, dpr = devicePixelRatio;
+  const w = innerWidth, h = innerHeight, dpr = Math.min(window.devicePixelRatio, 1.5);
   renderer.setPixelRatio(dpr); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-  for (const composer of [torusComposer, bloomComposer, finalComposer]) { composer.setPixelRatio(dpr); composer.setSize(w, h); }
-  atmoMat.uniforms.uRes.value.set(w * dpr, h * dpr); updateScroll(); wake();
+  finalComposer.setPixelRatio(dpr); finalComposer.setSize(w, h);
+  atmoMat.uniforms.uRes.value.set(w * dpr, h * dpr); updateScroll(); loop.requestRender();
 }
 window.addEventListener('resize', resize);
-document.addEventListener('visibilitychange', wake);
-reducedMotion.addEventListener('change', wake);
 window.addEventListener('message', event => {
   if (!embedded || event.origin !== location.origin || event.source !== parent || event.data?.type !== 'lever:flow-wave') return;
   const data = event.data;
   if (Number.isFinite(data.scroll)) scrollTarget = clamp(data.scroll, 0, 1);
   if (Number.isFinite(data.x) && Number.isFinite(data.y)) { mouseTarget.x = clamp(data.x, -1, 1); mouseTarget.y = clamp(data.y, -1, 1); POINTER.active = true; POINTER.lastMove = performance.now(); }
   if (data.active === false) POINTER.active = false;
-  if (typeof data.paused === 'boolean') { paused = data.paused; if (paused && frame) { cancelAnimationFrame(frame); frame = 0; } else if (!reducedMotion.matches) wake(); }
+  if (typeof data.paused === 'boolean') { paused = data.paused; loop.setPaused(paused || contextLost); }
 });
-canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); paused = true; if (frame) cancelAnimationFrame(frame); frame = 0; document.getElementById('fallback').style.display = 'block'; });
+canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); contextLost = true; loop.setPaused(true); document.getElementById('fallback').style.display = 'block'; });
 canvas.addEventListener('webglcontextrestored', () => location.reload());
-window.addEventListener('pagehide', () => { disposed = true; cancelAnimationFrame(frame); scene.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); }); for (const composer of [torusComposer, bloomComposer, finalComposer]) { for (const pass of composer.passes) pass.dispose?.(); composer.dispose?.(); } renderer.dispose(); }, { once: true });
+window.addEventListener('pagehide', () => { loop.dispose(); scene.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); }); for (const pass of finalComposer.passes) pass.dispose?.(); finalComposer.dispose(); renderer.dispose(); }, { once: true });
 resize();
 if (embedded) parent.postMessage({ type: 'lever:flow-wave-ready' }, location.origin);
 } catch (error) { console.error('Flow Wave could not initialize:', error); document.getElementById('fallback').style.display = 'block'; }

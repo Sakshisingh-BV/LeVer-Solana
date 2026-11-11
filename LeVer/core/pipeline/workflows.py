@@ -474,3 +474,80 @@ def workflow_audit_only(ctx, agents, tools, target_code, skip_proofs, ablation_m
     else:
         print("\nAudit result: configured criteria failed.")
     return success
+
+def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
+    """Phase-1 Solana workflow: generate + structurally validate an Anchor program.
+
+    Routed through ``SolanaAdapter`` (see core/adapter_factory.py). ``anchor build``,
+    Kani proofs and ``anchor test`` are intentionally NOT executed here — they are
+    specified in SOLANA_VERIFICATION_ROADMAP.md and will plug into this loop as
+    adapter.check_compilation / verify_spec / run_tests.
+    """
+    if mode not in THREE_MODES:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    model = getattr(adapter, "model_name", None) or os.getenv("LLM_MODEL", "")
+    ctx.checkpoint.save_stage("original_requirement", requirement)
+    ctx.checkpoint.save_stage("target", "solana")
+    last_reason = "maximum iterations exhausted"
+    current_code = ctx.checkpoint.load_stage("anchor_code") or ""
+
+    def _write_result(passed, reason):
+        result = {
+            "target": "solana",
+            "mode": mode,
+            "model": model,
+            "decision_policy": "generation_only",
+            "passed": bool(passed),
+            "generation_valid": bool(passed),
+            "iterations": ctx.iteration,
+            "max_iterations": max_iters,
+            "reason": reason,
+            "verification": {
+                "anchor_build": "not_implemented",
+                "kani": "not_implemented",
+                "anchor_test": "not_implemented",
+            },
+        }
+        with open(os.path.join(ctx.workspace, "result.json"), "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        return result
+
+    while ctx.iteration < max_iters:
+        ctx.iteration += 1
+        print(f"\n======== ITERATION {ctx.iteration}/{max_iters} (solana:{mode}) ========")
+
+        if ctx.iteration == 1 or not current_code:
+            print("1. Generating Anchor program from requirement...")
+            candidate = adapter.generate_code(
+                requirement, [], feedback_constraints=ctx.feedback_constraints or None
+            )
+        else:
+            print("1. Repairing the current Anchor program...")
+            candidate = adapter.repair_code(current_code, "\n".join(ctx.feedback_constraints))
+
+        print("2. Validating Anchor program structure...")
+        if not adapter.is_valid_source(candidate):
+            last_reason = "Anchor generation returned empty or structurally invalid source"
+            ctx.feedback_constraints.append(
+                "Return ONE complete Anchor program: `use anchor_lang::prelude::*;`, "
+                "`declare_id!`, a `#[program]` module and `#[derive(Accounts)]` structs."
+            )
+            print(f"   FAILED: {last_reason}")
+            continue
+
+        current_code = candidate
+        ctx.checkpoint.save_stage("anchor_code", candidate)
+        with open(os.path.join(ctx.workspace, "Target.rs"), "w", encoding="utf-8") as f:
+            f.write(candidate)
+        print("   Anchor source saved to Target.rs")
+
+        print("3. Anchor build / Kani / anchor test: not implemented (see SOLANA_VERIFICATION_ROADMAP.md).")
+        _write_result(
+            True,
+            "Anchor source generated and structurally validated; build, Kani and anchor test stages pending (Phase 2)",
+        )
+        return True
+
+    _write_result(False, last_reason)
+    return False

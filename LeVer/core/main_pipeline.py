@@ -16,11 +16,12 @@ from core.agents import (
     SemanticObligationExtractor,
     SolidityCoder,
 )
+from core.adapter_factory import adapter_factory
 from core.formal_verifier import FormalVerifier
 from core.logger import GLOBAL_LOGGER
 from core.pipeline.checkpoint import CheckpointManager
 from core.pipeline.context import PipelineContext
-from core.pipeline.workflows import workflow_from_requirement
+from core.pipeline.workflows import workflow_from_requirement, workflow_solana_generate_only
 from core.simulator import SimulationRunner
 
 
@@ -43,6 +44,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=["full", "lean_only", "no_lean"],
         default="full",
+    )
+    parser.add_argument(
+        "--target",
+        choices=["solidity", "solana"],
+        default="solidity",
+        help="Target chain adapter (core.adapter_factory). Default keeps the Solidity workflow.",
     )
     parser.add_argument("--req-file", required=True, help="UTF-8 requirement text file")
     parser.add_argument("--exp-name", default="three_mode_smoke")
@@ -88,6 +95,25 @@ def main(argv=None) -> int:
         GLOBAL_LOGGER.configure(str(workspace / "execution.log"))
         checkpoint = CheckpointManager(str(workspace / "checkpoint.json"))
         ctx = PipelineContext(str(workspace), checkpoint)
+
+        # Target routing (Factory): unknown targets fail fast. Solana runs the
+        # Phase-1 generation workflow; Solidity continues on the unchanged path.
+        adapter = adapter_factory(args.target, model_name=args.model, attack_rounds=args.attack_rounds)
+        if args.target == "solana":
+            print(f"\nTarget: solana ({adapter.toolchain})")
+            print(f"Mode: {args.mode}")
+            print(f"Model: {args.model}")
+            print(f"Workspace: {workspace}")
+            passed = workflow_solana_generate_only(
+                ctx=ctx, adapter=adapter, requirement=requirement,
+                mode=args.mode, max_iters=args.max_iters,
+            )
+            final_path = workspace / "result.json"
+            result = json.loads(final_path.read_text(encoding="utf-8"))
+            print(f"\nPIPELINE {'GENERATED' if passed else 'FAILED'}: solana/{args.mode} (verification stages pending - Phase 2)")
+            print(f"Result: {final_path}")
+            print(f"Iterations: {result.get('iterations')}")
+            return 0 if passed else 1
 
         property_path = project_root / "property.json"
         if not property_path.is_file():

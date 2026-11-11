@@ -30,6 +30,43 @@ class TargetAdapter(ABC):
         extract_counterexample()  → Parse test/verifier output for failures
     """
 
+    # ── Adapter metadata (used by the factory, CLI routing and the HTTP API) ──
+    #: Registry key, e.g. "solidity" / "solana".
+    target: str = ""
+    #: Human-readable toolchain summary.
+    toolchain: str = ""
+    #: CLI tools that must be on PATH for the full pipeline.
+    required_tools: Tuple[str, ...] = ()
+    #: Tools that improve coverage but whose absence the pipeline tolerates.
+    optional_tools: Tuple[str, ...] = ()
+    #: Pipeline stages this adapter can execute today.
+    implemented_stages: Tuple[str, ...] = ()
+
+    ALL_STAGES: Tuple[str, ...] = (
+        "generate", "repair", "validate", "compile",
+        "formal_spec", "verify", "test_harness", "run_tests", "counterexample",
+    )
+
+    def describe(self) -> Dict[str, Any]:
+        """Capability report: toolchain presence and implemented stages (no LLM calls)."""
+        import shutil
+
+        tools = {name: shutil.which(name) is not None for name in self.required_tools}
+        optional = {name: shutil.which(name) is not None for name in self.optional_tools}
+        missing_stages = [s for s in self.ALL_STAGES if s not in self.implemented_stages]
+        return {
+            "target": self.target,
+            "toolchain": self.toolchain,
+            "tools": tools,
+            "optional_tools": optional,
+            "implemented_stages": list(self.implemented_stages),
+            "missing_stages": missing_stages,
+            # "available": the adapter can at least generate code for this target.
+            "available": "generate" in self.implemented_stages,
+            # "pipeline_ready": every stage is implemented and every required tool is installed.
+            "pipeline_ready": not missing_stages and all(tools.values()),
+        }
+
     # ── Code Generation ──────────────────────────────────────────────
 
     @abstractmethod

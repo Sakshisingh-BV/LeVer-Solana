@@ -11,6 +11,7 @@ import LandingPage from './pages/LandingPage';
 import RunDetailPage from './pages/RunDetailPage';
 import RunHistoryPage from './pages/RunHistoryPage';
 import PropertiesPage from './pages/PropertiesPage';
+
 import { DocumentationPage, SettingsPage } from './pages/WorkspacePages';
 import type { RunInput } from './types/run';
 
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/runs/:id" element={<RunDetailPage {...detailProps} />} />
         <Route path="/preview/solidity" element={<RunDetailPage key="preview-solidity" {...detailProps} preview={previewRun('solidity')} />} />
         <Route path="/preview/solana" element={<RunDetailPage key="preview-solana" {...detailProps} preview={previewRun('solana')} />} />
+
         <Route path="/properties" element={<PropertiesPage />} />
         <Route path="/docs" element={<DocumentationPage />} />
         <Route path="/settings" element={<SettingsPage ambient={ambient} setAmbient={setAmbient} />} />

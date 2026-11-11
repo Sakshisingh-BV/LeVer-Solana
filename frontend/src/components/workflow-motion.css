@@ -1,0 +1,124 @@
+.landing-workflow {
+  --workflow-gap: 24px;
+  --workflow-node-size: 54px;
+  --workflow-hop: 1.6s;
+  --workflow-cycle: 8s;
+  gap: var(--workflow-gap);
+}
+
+/* Connect node centers so the light enters each stage before being relayed. */
+.landing-workflow li:not(:last-child)::after { content: none; }
+
+.workflow-connector {
+  position: absolute;
+  top: calc(var(--workflow-node-size) / 2 - 7px);
+  left: calc(var(--workflow-node-size) / 2);
+  width: calc(100% + var(--workflow-gap));
+  height: 14px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.workflow-connector::before {
+  content: '';
+  position: absolute;
+  inset: 6px 0 auto;
+  height: 1px;
+  background: #6d987d45;
+}
+
+.workflow-connector::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: -36%;
+  width: 36%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #00a97f 45%, #74e5b1 80%, #edfff7);
+  box-shadow: 0 0 6px #74e5b1, 0 0 12px #00a97f80;
+  opacity: 0;
+  animation: workflow-beam-x var(--workflow-cycle) linear infinite;
+  animation-delay: calc(var(--step-index) * var(--workflow-hop));
+}
+
+.landing-workflow .workflow-node {
+  z-index: 1;
+  animation: workflow-node-pulse var(--workflow-cycle) ease-out infinite;
+  animation-delay: calc(var(--step-index) * var(--workflow-hop));
+}
+
+.workflow-node::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid #74e5b1;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  animation: workflow-node-ring var(--workflow-cycle) ease-out infinite;
+  animation-delay: calc(var(--step-index) * var(--workflow-hop));
+}
+
+/* Each hop takes one fifth of the cycle, followed by the final stage's glow. */
+@keyframes workflow-beam-x {
+  0% { transform: translateX(0); opacity: 0; }
+  1%, 19% { opacity: 1; }
+  20%, 100% { transform: translateX(277.778%); opacity: 0; }
+}
+
+@keyframes workflow-beam-y {
+  0% { transform: translateY(0); opacity: 0; }
+  1%, 19% { opacity: 1; }
+  20%, 100% { transform: translateY(277.778%); opacity: 0; }
+}
+
+@keyframes workflow-node-pulse {
+  0%, 100% { border-color: #bddac821; background-color: #121b16; color: #9cc8ac; box-shadow: 0 0 0 #00a97f00; }
+  3%, 8% { border-color: #74e5b1; background-color: #173e2b; color: #d9ffed; box-shadow: 0 0 24px #00a97f50, inset 0 0 16px #74e5b112; }
+  20%, 99% { border-color: #bddac821; background-color: #121b16; color: #9cc8ac; box-shadow: 0 0 0 #00a97f00; }
+}
+
+@keyframes workflow-node-ring {
+  0% { transform: scale(1); opacity: 0; }
+  3% { opacity: .65; }
+  18%, 100% { transform: scale(1.3); opacity: 0; }
+}
+
+/* Keep all five stages on one connected path on tablets and phones. */
+@media (max-width: 800px) {
+  .landing-workflow {
+    --workflow-gap: 28px;
+    grid-template-columns: 1fr;
+  }
+
+  .landing-workflow li { min-height: 66px; padding-left: 79px; }
+  .landing-workflow .workflow-node { position: absolute; left: 0; top: 0; }
+  .landing-workflow h3 { margin-top: 1px; }
+  .landing-workflow p { max-width: 440px; }
+
+  .workflow-connector {
+    top: calc(var(--workflow-node-size) / 2);
+    left: calc(var(--workflow-node-size) / 2 - 7px);
+    width: 14px;
+    height: calc(100% + var(--workflow-gap));
+  }
+
+  .workflow-connector::before { inset: 0 auto 0 6px; width: 1px; height: auto; }
+  .workflow-connector::after {
+    top: -36%;
+    left: 6px;
+    width: 2px;
+    height: 36%;
+    background: linear-gradient(180deg, transparent, #00a97f 45%, #74e5b1 80%, #edfff7);
+    animation-name: workflow-beam-y;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-workflow .workflow-node,
+  .workflow-node::after,
+  .workflow-connector::after { animation: none; }
+
+  .workflow-connector::before { background: #74e5b16b; }
+}
