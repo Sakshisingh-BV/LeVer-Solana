@@ -1,0 +1,71 @@
+Kani Rust Verifier 0.68.0 (cargo plugin)
+CBMC 6.11.0
+   Compiling lever-kani v0.1.0 (/tmp/kt)
+warning: use of an unstable feature
+ --> <crate attribute>:1:12
+  |
+1 | #![feature(register_tool)]
+  |            ^^^^^^^^^^^^^
+  |
+  = note: requested on the command line with `--force-warn unstable-features`
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+Checking harness sol_07_checked_ok...
+CBMC 6.11.0 (cbmc-6.11.0)
+CBMC version 6.11.0 (cbmc-6.11.0) 64-bit x86_64 linux
+Reading GOTO program from file /tmp/kt/target/kani/x86_64-unknown-linux-gnu/debug/build/lever-kani/6922b7b2ffaab067/out/lever_kani-6922b7b2ffaab067__RNvCs142nkCtNvIp_10lever_kani17sol_07_checked_ok.out
+Generating GOTO Program
+Adding CPROVER library (x86_64)
+Removal of function pointers and virtual functions
+Generic Property Instrumentation
+Running with 16 object bits, 48 offset bits (user-specified)
+Starting Bounded Model Checking
+aborting path on assume(false) at file src/lib.rs line 6 column 1 function sol_07_checked_ok thread 0
+Runtime Symex: 0.0053675s
+size of program expression: 244 steps
+slicing removed 113 assignments
+Generated 4 VCC(s), 4 remaining after simplification
+Runtime Postprocess Equation: 0.000118231s
+Passing problem to propositional reduction
+converting SSA
+Runtime Convert SSA: 0.00175527s
+Running propositional reduction
+Post-processing
+Runtime Post-process: 5.7277e-05s
+Solving with CaDiCaL 3.0.0
+734 variables, 1976 clauses
+SAT checker: instance is SATISFIABLE
+Runtime Solver: 0.00167782s
+Runtime decision procedure: 0.00498786s
+Running propositional reduction
+Solving with CaDiCaL 3.0.0
+735 variables, 1977 clauses
+SAT checker: instance is UNSATISFIABLE
+Runtime Solver: 0.00103186s
+Runtime decision procedure: 0.00111893s
+
+RESULTS:
+Check 1: core::num::<impl u64>::checked_add.arithmetic_overflow.1
+         - Status: SUCCESS
+         - Description: "attempt to compute `unchecked_add` which would overflow"
+         - Location: ../../home/runner/.rustup/toolchains/nightly-2026-08-21-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/num/uint_macros.rs:942:31 in function core::num::<impl u64>::checked_add
+
+Check 2: sol_07_checked_ok.unreachable.1
+         - Status: SUCCESS
+         - Description: "unreachable code"
+         - Location: src/lib.rs:6:1 in function sol_07_checked_ok
+
+Check 3: sol_07_checked_ok.assertion.1
+         - Status: SUCCESS
+         - Description: "assertion failed: s >= a"
+         - Location: src/lib.rs:9:42 in function sol_07_checked_ok
+
+
+SUMMARY:
+ ** 0 of 3 failed
+
+VERIFICATION:- SUCCESSFUL
+Verification Time: 0.04919082s
+
+Manual Harness Summary:
+Complete - 1 successfully verified harnesses, 0 failures, 1 total.

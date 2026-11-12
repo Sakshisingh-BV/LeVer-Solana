@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.kani_templates import DEFAULT_UNWIND, KANI_ELIGIBLE, get_kani_template
 
@@ -302,25 +302,22 @@ def parse_kani_output(stdout: str, stderr: str, returncode: int) -> Dict[str, An
     """
     combined = f"{stdout}\n{stderr}".replace("\r\n", "\n")
 
-    # Split into per-harness sections ("Checking harness <name>...").
-    starts = list(_KANI_HARNESS_RE.finditer(combined))
-    sections = [
-        (m.group(1), combined[m.end(): starts[i + 1].start() if i + 1 < len(starts) else len(combined)])
-        for i, m in enumerate(starts)
-    ] or [("", combined)]
-
     checks: List[Dict[str, Any]] = []
     harnesses: Dict[str, str] = {}
-    for harness, section in sections:
+    counterexamples: List[Dict[str, Any]] = []
+    for harness, section in _harness_sections(combined):
         for m in _KANI_CHECK_RE.finditer(section):
             checks.append({
                 "harness": harness,
                 "id": int(m.group(1)),
                 "name": m.group(2),
                 "status": m.group(3),
-                "description": m.group(4) or "",
+                "description": _clean_description(m.group(4)),
                 "location": (m.group(5) or "").strip(),
             })
+        cex = _section_counterexample(harness, section, combined)
+        if cex is not None:
+            counterexamples.append(cex)
         verdict = _KANI_VERDICT_RE.search(section)
         if harness and verdict:
             harnesses[harness] = verdict.group(1)
@@ -348,28 +345,103 @@ def parse_kani_output(stdout: str, stderr: str, returncode: int) -> Dict[str, An
         "checks": checks,
         "harnesses": harnesses,
         "errors": [] if success else [combined[-2000:]],
-        "counterexamples": [],  # TODO: Extract CBMC counterexamples (needs concrete playback)
+        "counterexamples": counterexamples,
     }
 
 
 def extract_kani_counterexample(kani_output: str) -> Optional[Dict[str, Any]]:
-    """Extract a concrete counterexample from Kani CBMC output.
+    """Extract the counterexample for the first failing harness in Kani output.
+
+    The failing check is the first ``Check N:`` block with ``Status: FAILURE``.
+    Concrete input values come from the ``Concrete playback unit test for
+    `<harness>``` block (printed with ``--concrete-playback=print``): each
+    ``// <number><suffix>`` comment above a byte vector gives one ``kani::any()``
+    value, in order. Kani does not name the variables, so they are stored by
+    position as ``input_0``, ``input_1``, ... with decimal string values.
+    Without a playback block, ``assignments`` is ``{}``.
 
     Returns
     -------
     dict | None
-        Structured counterexample with variable assignments, or None.
+        ``{"source", "harness", "property_id", "check", "description", "location",
+        "assignments", "raw_trace"}``, or None when no check failed.
     """
-    # TODO: Parse CBMC trace output for concrete counterexample values
-    #       Kani outputs "TRACE" sections with variable assignments
-    if "Trace:" not in kani_output:
+    if not kani_output:
+        return None
+    combined = kani_output.replace("\r\n", "\n")
+    for harness, section in _harness_sections(combined):
+        cex = _section_counterexample(harness, section, combined)
+        if cex is not None:
+            return cex
+    return None
+
+
+def _harness_sections(combined: str) -> List[Tuple[str, str]]:
+    """Split output into ``(harness, text)`` pairs at each "Checking harness <name>..." line.
+
+    Output with no such line is returned as one section with harness ``""``.
+    """
+    starts = list(_KANI_HARNESS_RE.finditer(combined))
+    return [
+        (m.group(1), combined[m.end(): starts[i + 1].start() if i + 1 < len(starts) else len(combined)])
+        for i, m in enumerate(starts)
+    ] or [("", combined)]
+
+
+def _clean_description(desc: Optional[str]) -> str:
+    """Drop the extra quote pair Kani prints around assert messages.
+
+    Kani 0.68 prints an ``assert!(cond, "msg")`` check as ``Description: ""msg""``;
+    the check regex removes the outer pair, leaving ``"msg"``, which this unwraps.
+    """
+    desc = desc or ""
+    if len(desc) >= 2 and desc.startswith('"') and desc.endswith('"'):
+        desc = desc[1:-1]
+    return desc
+
+
+# One concrete value per line in a playback test, e.g. "        // 9223372036854775808ul".
+# Doc comments ("/// ...") don't match: the value must start right after "//".
+_PLAYBACK_VALUE_RE = re.compile(r"^[ \t]*//[ \t]*(-?\d+)[A-Za-z0-9_]*[ \t]*$", re.MULTILINE)
+_IN_FUNCTION_RE = re.compile(r"\s+in function\s+.*$")
+
+
+def _playback_block(combined: str, harness: str) -> Optional[str]:
+    """The fenced "Concrete playback unit test for `<harness>`:" block, or None."""
+    if not harness:
+        return None
+    m = re.search(
+        r"^Concrete playback unit test for `" + re.escape(harness) + r"`:[ \t]*\n```[^\n]*\n.*?^```",
+        combined,
+        re.MULTILINE | re.DOTALL,
+    )
+    return m.group(0) if m else None
+
+
+def _section_counterexample(harness: str, section: str, combined: str) -> Optional[Dict[str, Any]]:
+    """Counterexample for one harness's output section, or None if none of its checks failed."""
+    failing = next(
+        (m for m in _KANI_CHECK_RE.finditer(section) if m.group(3) == "FAILURE"),
+        None,
+    )
+    if failing is None:
         return None
 
-    # Placeholder: return raw trace section
-    trace_start = kani_output.index("Trace:")
-    trace_text = kani_output[trace_start : trace_start + 3000]
+    playback = _playback_block(combined, harness)
+    assignments: Dict[str, str] = {}
+    raw_trace = failing.group(0).strip()
+    if playback:
+        values = _PLAYBACK_VALUE_RE.findall(playback)
+        assignments = {f"input_{i}": str(int(v)) for i, v in enumerate(values)}
+        raw_trace += "\n\n" + playback.strip()
+
     return {
         "source": "kani",
-        "raw_trace": trace_text,
-        "assignments": {},  # TODO: Parse individual assignments
+        "harness": harness,
+        "property_id": harness_property_id(harness),
+        "check": failing.group(2),
+        "description": _clean_description(failing.group(4)),
+        "location": _IN_FUNCTION_RE.sub("", (failing.group(5) or "").strip()),
+        "assignments": assignments,
+        "raw_trace": raw_trace,
     }
