@@ -189,6 +189,12 @@ class KaniHarnessWriter(BaseAgent):
         "4. Use `kani::any()` for inputs and `kani::assume()` for preconditions, then assert\n"
         "   the property. Never write a harness that passes vacuously.\n"
         "5. No Markdown explanations — Rust source only.\n"
+        "6. Snapshot rule for expected values and 'nothing changed' checks: first finish\n"
+        "   ALL setup edits to the inputs (e.g. clearing a signer flag), THEN copy them\n"
+        "   (`let accts_before = accts; let state_before = state;`), THEN make the call.\n"
+        "   Compare post-call values only against that snapshot, never against an\n"
+        "   earlier baseline (like a `good` setup) that the setup has since changed.\n"
+        "   Never modify a snapshot or expected value after the call.\n"
     )
 
     def __init__(self, model_name: Optional[str] = None, api_key: Optional[str] = None,
