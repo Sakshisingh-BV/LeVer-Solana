@@ -2,13 +2,15 @@
 
 One mapper per target (Strategy). Mappers only read artifacts the existing
 pipeline already writes (``Target.sol``/``Target.rs``, ``result.json``,
-``metrics_iter_N.json``, ``checkpoint.json``, Lean/Foundry sources); they do
+``metrics_iter_N.json``, ``checkpoint.json``, Lean/Foundry sources, Kani's
+``kani_workspace``); they do
 not alter pipeline behaviour.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -313,7 +315,35 @@ class SolidityResultMapper(ResultMapper):
         return "\n".join(lines)
 
 
-# ── Solana (Phase 1: generation + structural validation only) ────────
+# ── Solana (generation + Kani model checking) ────────────────────────
+
+_KANI_STATUS = {"passed": "passed", "successful": "passed", "failed": "failed", "failure": "failed",
+                "skipped": "skipped", "not_run": "skipped"}
+_KANI_LOCATION = re.compile(r"src/lib\.rs:(\d+)")
+_KANI_MESSAGE = re.compile(r"^(SOL-\d+)\s+\S+:\s*(.*?)(?:\s+@\s+(src/lib\.rs:\d+(?::\d+)?))?(?:\s+in function .*)?$")
+KANI_LIB_PATH = "kani_workspace/src/lib.rs"
+
+
+def _kani_status(value: Any) -> Status:
+    return _KANI_STATUS.get(str(value or "").strip().lower(), "unknown")
+
+
+def _count(value: Any) -> int:
+    """Kani result fields are either counts or lists of check names."""
+    if isinstance(value, (list, tuple, dict)):
+        return len(value)
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _harness_label(harness: str) -> str:
+    """``verification::sol_01_signer_check`` -> ``signer check``."""
+    name = harness.rsplit("::", 1)[-1]
+    parts = name.split("_", 2)
+    return parts[2].replace("_", " ") if len(parts) == 3 and parts[0] == "sol" else name
+
 
 class SolanaResultMapper(ResultMapper):
     NOT_IMPLEMENTED = "Not implemented yet — see SOLANA_VERIFICATION_ROADMAP.md."
@@ -321,42 +351,208 @@ class SolanaResultMapper(ResultMapper):
     def map(self, spec, exit_code, logs):
         ws = spec.workspace
         source = _read_text(ws / "Target.rs")
-        result_json = _read_json(ws / "result.json")
         if source is None:
             return None
+        result_json = _read_json(ws / "result.json")
+        kani = (result_json.get("verification") or {}).get("kani")
+        kani = kani if isinstance(kani, dict) else None
+        kani_raw = _read_json(ws / "kani_workspace" / "kani_result.json") or \
+            (_read_json(ws / "checkpoint.json").get("kani_result") or {})
+        harness_src = _read_text(ws / "kani_workspace" / "src" / "lib.rs")
+
         files = [{"path": "programs/lever_target/src/lib.rs", "language": "rust", "content": source}]
+        if harness_src:
+            files.append({"path": KANI_LIB_PATH, "language": "rust", "content": harness_src})
+
         valid = bool(result_json.get("generation_valid"))
         checks = [
             _check("Anchor source generation", "passed" if valid else "failed",
                    "Structurally valid Anchor program (anchor_lang import + #[program])." if valid
                    else result_json.get("reason") or "Generated source failed the structural check."),
             _check("Anchor build (anchor build)", "skipped", self.NOT_IMPLEMENTED),
-            _check("Kani formal verification (cargo kani)", "skipped", self.NOT_IMPLEMENTED),
-            _check("Anchor tests (anchor test + local validator)", "skipped", self.NOT_IMPLEMENTED),
         ]
-        verification = {
-            "status": "skipped" if valid else "failed",
-            "detail": ("Anchor program generated and validated. Build, Kani proofs and local-validator tests are "
-                       "Phase 2 roadmap items and were not executed.") if valid else (result_json.get("reason") or "Generation failed."),
-            "checks": checks,
-        }
-        summary = "\n".join([
-            f"Target: Solana (Anchor) · mode {spec.cli_mode} · model {result_json.get('model') or spec.model or 'default'}",
-            f"Generation: {'valid' if valid else 'invalid'} after {result_json.get('iterations', '?')}/{spec.max_iters} iteration(s).",
-            "Verification: skipped (anchor build / cargo kani / anchor test pending — Phase 2).",
-            f"Workspace: {spec.workspace}",
-        ])
+        checks.extend(self._kani_checks(spec, kani, kani_raw))
+        checks.append(_check("Anchor tests (anchor test + local validator)", "skipped", self.NOT_IMPLEMENTED))
+
+        verification = self._verification(valid, kani, result_json, checks)
+        issues = self._issues(kani, kani_raw)
+        summary = self._summary(spec, result_json, kani, kani_raw, valid)
         report = {
             "filename": f"lever-{spec.run_id}-report.json", "mimeType": "application/json",
-            "content": json.dumps({"run": {"id": spec.run_id, "name": spec.name, "target": "solana", "mode": spec.cli_mode},
-                                   "result": result_json}, indent=2, ensure_ascii=False, default=str),
+            "content": json.dumps({
+                "run": {"id": spec.run_id, "name": spec.name, "target": "solana", "mode": spec.cli_mode,
+                        "max_iterations": spec.max_iters, "exit_code": exit_code},
+                "result": result_json,
+                "kani": {
+                    **{k: kani_raw.get(k) for k in ("success", "fidelity", "harnesses", "properties", "infra_error")
+                       if k in kani_raw},
+                    **{k: _count(kani_raw.get(k)) for k in ("checks", "passed_checks", "failed_checks",
+                                                             "undetermined_checks") if k in kani_raw},
+                },
+            }, indent=2, ensure_ascii=False, default=str),
         }
         return {
             "files": files,
-            "specification": "Kani harness generation is not implemented yet (Phase 2 roadmap).",
-            "verification": verification, "issues": [], "logs": self._tail_logs(logs),
+            "specification": self._specification(kani, kani_raw, harness_src),
+            "verification": verification, "issues": issues, "logs": self._tail_logs(logs),
             "summary": summary, "report": report,
         }
+
+    # -- Kani -----------------------------------------------------------
+
+    @staticmethod
+    def _kani_checks(spec, kani, kani_raw) -> List[Dict[str, Any]]:
+        name = "Kani formal verification (cargo kani)"
+        if kani is None:
+            if spec.cli_mode == "no_lean":
+                return [_check(name, "skipped", "Mode no_lean skips formal verification.")]
+            return [_check(name, "unknown", "No Kani result was recorded for this run.")]
+        if kani_raw.get("infra_error"):
+            return [_check(name, "unknown", "Kani could not run (infrastructure error); see logs.")]
+
+        props: Dict[str, Any] = kani.get("properties") or {}
+        statuses = {pid: _kani_status(st) for pid, st in props.items()}
+        passed = sum(1 for s in statuses.values() if s == "passed")
+        fidelity = kani.get("fidelity") or kani_raw.get("fidelity") or "unknown"
+        detail = f"{passed}/{len(statuses)} properties proven (fidelity: {fidelity})."
+        if _count(kani_raw.get("checks")):
+            detail += (f" {_count(kani_raw.get('passed_checks'))}/{_count(kani_raw.get('checks'))} Kani checks passed"
+                       f", {_count(kani_raw.get('failed_checks'))} failed.")
+        if fidelity == "model":
+            detail += " Harnesses check a plain-Rust model of the program, not the deployed Anchor code."
+        checks = [_check(name, _kani_status(kani.get("status")), detail)]
+
+        harness_names = {}
+        for harness in (kani_raw.get("harnesses") or {}):
+            pid = "SOL-" + harness.rsplit("::", 1)[-1].split("_")[1] if "sol_" in harness else None
+            if pid:
+                harness_names[pid] = _harness_label(harness)
+        messages = {}
+        for msg in kani.get("messages") or []:
+            m = _KANI_MESSAGE.match(str(msg))
+            if m:
+                messages.setdefault(m.group(1), f"{m.group(2)} ({m.group(3) or 'location unknown'})")
+        for pid in sorted(statuses):
+            label = f"Kani · {pid}" + (f" ({harness_names[pid]})" if pid in harness_names else "")
+            status = statuses[pid]
+            if status == "passed":
+                detail = "Harness verified: no counterexample within the explored bounds."
+            elif status == "failed":
+                detail = "Counterexample found: " + messages.get(pid, "see issues and Kani output.")
+            else:
+                detail = f"Kani reported '{props[pid]}'."
+            checks.append(_check(label, status, detail))
+
+        surface = kani.get("unverified_surface") or []
+        if surface:
+            checks.append(_check("Kani · not covered", "unknown",
+                                 "No harness was written for: " + ", ".join(surface) + "."))
+        return checks
+
+    @staticmethod
+    def _verification(valid, kani, result_json, checks) -> Dict[str, Any]:
+        reason = result_json.get("reason") or ""
+        if not result_json:
+            return {"status": "unknown", "detail": "The pipeline exited before writing result.json.", "checks": checks}
+        if not valid:
+            return {"status": "failed", "detail": reason or "Generation failed.", "checks": checks}
+        if kani is None:
+            return {"status": "skipped", "checks": checks,
+                    "detail": "Anchor program generated and validated. Kani, anchor build and local-validator "
+                              "tests were not executed."}
+        status = _kani_status(kani.get("status"))
+        detail = {
+            "passed": "All Kani harnesses verified. anchor build / anchor test are still pending (roadmap).",
+            "failed": "Kani found counterexamples for at least one property. " + reason,
+        }.get(status, "Kani verdict unavailable. " + reason)
+        return {"status": status, "detail": detail.strip(), "checks": checks}
+
+    @staticmethod
+    def _issues(kani, kani_raw) -> List[Dict[str, Any]]:
+        issues: List[Dict[str, Any]] = []
+        seen = set()
+        for i, cex in enumerate(kani_raw.get("counterexamples") or []):
+            if not isinstance(cex, dict):
+                continue
+            pid = cex.get("property_id") or "Kani"
+            seen.add(pid)
+            loc = cex.get("location") or ""
+            line_match = _KANI_LOCATION.search(loc)
+            issue = {
+                "id": f"kani-{pid}-{i}", "title": f"{pid}: Kani counterexample", "severity": "formal",
+                "description": f"{cex.get('description') or 'Assertion failed'}\n"
+                               f"Harness: {cex.get('harness', '?')}  ·  check: {cex.get('check', '?')}  ·  at {loc or '?'}",
+                "file": KANI_LIB_PATH,
+                "suggestion": "Inspect whether the program is missing this check or the harness asserts the wrong "
+                              "thing (e.g. compares against a value it modified itself).",
+            }
+            if line_match:
+                issue["line"] = int(line_match.group(1))
+            issues.append(issue)
+        for i, msg in enumerate((kani or {}).get("messages") or []):
+            m = _KANI_MESSAGE.match(str(msg))
+            if not m or m.group(1) in seen:
+                continue
+            seen.add(m.group(1))
+            issue = {"id": f"kani-{m.group(1)}-msg{i}", "title": f"{m.group(1)}: Kani counterexample",
+                     "severity": "formal", "description": str(msg), "file": KANI_LIB_PATH}
+            line_match = _KANI_LOCATION.search(str(msg))
+            if line_match:
+                issue["line"] = int(line_match.group(1))
+            issues.append(issue)
+        surface = (kani or {}).get("unverified_surface") or []
+        if surface:
+            issues.append({"id": "kani-unverified", "title": "Properties without a Kani harness", "severity": "coverage",
+                           "description": "Selected properties that Kani did not check: " + ", ".join(surface) + ".",
+                           "suggestion": "Add Kani templates for these properties or verify them with anchor tests."})
+        if kani_raw.get("infra_error"):
+            issues.append({"id": "kani-infra", "title": "Kani did not run", "severity": "infrastructure",
+                           "description": "cargo kani reported an infrastructure error; no verdict was produced.",
+                           "suggestion": "Check that cargo-kani is installed (cargo kani --version)."})
+        return issues
+
+    @staticmethod
+    def _specification(kani, kani_raw, harness_src) -> str:
+        if not harness_src and kani is None:
+            return "No Kani harnesses were generated for this run."
+        parts: List[str] = []
+        props = (kani or {}).get("properties") or {}
+        if props:
+            parts.append("Kani properties:")
+            for pid in sorted(props):
+                parts.append(f"- {pid}: {props[pid]}")
+            parts.append("")
+        surface = (kani or {}).get("unverified_surface") or []
+        if surface:
+            parts.append("Not covered by Kani: " + ", ".join(surface))
+            parts.append("")
+        if harness_src:
+            parts.append(f"==== {KANI_LIB_PATH} ====")
+            parts.append(harness_src)
+        return "\n".join(parts)
+
+    @staticmethod
+    def _summary(spec, result_json, kani, kani_raw, valid) -> str:
+        lines = [
+            f"Target: Solana (Anchor) · mode {spec.cli_mode} · model {result_json.get('model') or spec.model or 'default'}",
+            f"Generation: {'valid' if valid else 'invalid'} after {result_json.get('iterations', '?')}/"
+            f"{result_json.get('max_iterations', spec.max_iters)} iteration(s).",
+        ]
+        if kani is None:
+            lines.append("Kani: not run.")
+        else:
+            props = kani.get("properties") or {}
+            passed = [p for p, s in sorted(props.items()) if _kani_status(s) == "passed"]
+            failed = [p for p, s in sorted(props.items()) if _kani_status(s) == "failed"]
+            lines.append(f"Kani: {_kani_status(kani.get('status')).upper()} · {len(passed)}/{len(props)} properties proven"
+                         f" · fidelity {kani.get('fidelity') or kani_raw.get('fidelity') or '?'}")
+            if failed:
+                lines.append("Counterexamples: " + ", ".join(failed))
+            if kani.get("unverified_surface"):
+                lines.append("Not covered: " + ", ".join(kani["unverified_surface"]))
+        lines.append("Anchor build / anchor test: pending (roadmap).")
+        lines.append(f"Workspace: {spec.workspace}")
+        return "\n".join(lines)
 
 
 RESULT_MAPPERS: Dict[str, ResultMapper] = {
