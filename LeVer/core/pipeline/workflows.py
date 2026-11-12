@@ -1,6 +1,7 @@
 import json
 import os
 
+from core.kani_templates import KANI_ELIGIBLE, UNVERIFIED_SURFACE
 from core.logger import GLOBAL_LOGGER
 from core.pipeline.dataset import build_dataset_targets
 from core.pipeline.iteration import run_common_pipeline
@@ -8,6 +9,20 @@ from core.pipeline.solidity_utils import is_plausible_solidity_source
 
 
 THREE_MODES = {"full", "lean_only", "no_lean"}
+
+#: Solana modes that run the Kani stage. "lean_only" is the CLI's lean mode.
+SOLANA_KANI_MODES = {"full", "lean_only"}
+
+#: Static default Kani property set until property selection is wired in.
+DEFAULT_SOLANA_KANI_PROPERTIES = tuple(
+    pid for pid in ("SOL-01", "SOL-02", "SOL-04", "SOL-07", "SOL-08") if pid in KANI_ELIGIBLE
+)
+
+_KANI_PROPERTY_STATUS = {"SUCCESSFUL": "passed", "FAILED": "failed"}
+_SCAFFOLD_WARNING = (
+    "Kani harnesses are unfilled scaffold placeholders (harness generation fell back); "
+    "this result proves nothing about the program."
+)
 
 
 def _read_iteration_metrics(ctx):
@@ -475,13 +490,100 @@ def workflow_audit_only(ctx, agents, tools, target_code, skip_proofs, ablation_m
         print("\nAudit result: configured criteria failed.")
     return success
 
-def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
-    """Phase-1 Solana workflow: generate + structurally validate an Anchor program.
+def _kani_skipped(reason):
+    return {
+        "status": "skipped",
+        "reason": reason,
+        "fidelity": None,
+        "properties": {},
+        "messages": [],
+        "unverified_surface": list(UNVERIFIED_SURFACE),
+    }
 
-    Routed through ``SolanaAdapter`` (see core/adapter_factory.py). ``anchor build``,
-    Kani proofs and ``anchor test`` are intentionally NOT executed here — they are
-    specified in SOLANA_VERIFICATION_ROADMAP.md and will plug into this loop as
-    adapter.check_compilation / verify_spec / run_tests.
+
+def _run_solana_kani(ctx, adapter, code, mode, properties=DEFAULT_SOLANA_KANI_PROPERTIES):
+    """Kani stage for the Solana workflow; returns the result.json ``kani`` section.
+
+    Never raises: an exception from spec generation or ``verify_spec`` is recorded as
+    ``infra_error``. Only genuine verification failures add ``ctx.feedback_constraints``.
+    """
+    if mode not in SOLANA_KANI_MODES:
+        return _kani_skipped(f"kani not run in mode '{mode}'")
+
+    properties = [pid for pid in properties if pid in KANI_ELIGIBLE]
+    try:
+        spec = adapter.generate_formal_spec(code, properties)
+    except Exception as exc:  # LLM / harness-writer failure is tooling, not code
+        message = f"infra_error: formal spec generation raised {type(exc).__name__}: {exc}"
+        GLOBAL_LOGGER.log_system("KANI_INFRA_ERROR", message)
+        print(f"   Kani INFRA ERROR: {message}")
+        return {
+            "status": "infra_error",
+            "fidelity": getattr(adapter, "last_fidelity", None),
+            "properties": {pid: "undetermined" for pid in properties},
+            "messages": [message],
+            "unverified_surface": list(UNVERIFIED_SURFACE),
+        }
+
+    if not spec:
+        GLOBAL_LOGGER.log_system("KANI_SKIPPED", "no eligible properties")
+        print("   Kani skipped: no eligible properties")
+        return _kani_skipped("no eligible properties")
+
+    adapter.last_kani_result = None
+    try:
+        ok, messages = adapter.verify_spec(spec, ctx.workspace)
+        messages = list(messages or [])
+    except Exception as exc:
+        ok = False
+        messages = [f"infra_error: verify_spec raised {type(exc).__name__}: {exc}"]
+        kani_result = {"infra_error": True}
+    else:
+        kani_result = getattr(adapter, "last_kani_result", None) or {}
+
+    fidelity = kani_result.get("fidelity") or getattr(adapter, "last_fidelity", None)
+    if kani_result.get("infra_error"):
+        status = "infra_error"
+    else:
+        status = "passed" if ok else "failed"
+
+    raw_props = kani_result.get("properties") or {}
+    prop_status = {}
+    for pid in properties:
+        raw = (raw_props.get(pid) or {}).get("status")
+        prop_status[pid] = _KANI_PROPERTY_STATUS.get(raw, "undetermined")
+
+    section = {
+        "status": status,
+        "fidelity": fidelity,
+        "properties": prop_status,
+        "messages": messages,
+        "unverified_surface": list(UNVERIFIED_SURFACE),
+    }
+    if fidelity == "scaffold":
+        section["warning"] = _SCAFFOLD_WARNING
+        GLOBAL_LOGGER.log_system("KANI_SCAFFOLD", _SCAFFOLD_WARNING)
+        print(f"   WARNING: {_SCAFFOLD_WARNING}")
+
+    if status == "failed":
+        ctx.feedback_constraints.extend(f"Kani: {m}" for m in messages)
+    GLOBAL_LOGGER.log_system(
+        "KANI_RESULT", json.dumps({"status": status, "fidelity": fidelity, "messages": messages})
+    )
+    print(f"   Kani {status.upper()} (fidelity: {fidelity})")
+    for m in messages:
+        print(f"      {m}")
+    return section
+
+
+def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
+    """Solana workflow: generate + structurally validate an Anchor program, then Kani.
+
+    Routed through ``SolanaAdapter`` (see core/adapter_factory.py). In modes
+    "full"/"lean_only" the Kani stage runs after structural validation and is
+    non-blocking: its outcome is recorded in result.json["verification"]["kani"]
+    but does not change ``passed``. ``anchor build`` and ``anchor test`` are still
+    not executed (SOLANA_VERIFICATION_ROADMAP.md).
     """
     if mode not in THREE_MODES:
         raise ValueError(f"Unsupported mode: {mode}")
@@ -492,7 +594,7 @@ def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
     last_reason = "maximum iterations exhausted"
     current_code = ctx.checkpoint.load_stage("anchor_code") or ""
 
-    def _write_result(passed, reason):
+    def _write_result(passed, reason, kani=None):
         result = {
             "target": "solana",
             "mode": mode,
@@ -505,7 +607,7 @@ def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
             "reason": reason,
             "verification": {
                 "anchor_build": "not_implemented",
-                "kani": "not_implemented",
+                "kani": kani or _kani_skipped("kani stage not reached"),
                 "anchor_test": "not_implemented",
             },
         }
@@ -542,12 +644,21 @@ def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
             f.write(candidate)
         print("   Anchor source saved to Target.rs")
 
-        print("3. Anchor build / Kani / anchor test: not implemented (see SOLANA_VERIFICATION_ROADMAP.md).")
+        print(f"3. Kani verification (mode: {mode})...")
+        kani = _run_solana_kani(ctx, adapter, candidate, mode)
+        ctx.checkpoint.save_stage("kani_result", kani)
+
+        print("4. Anchor build / anchor test: not implemented (see SOLANA_VERIFICATION_ROADMAP.md).")
         _write_result(
             True,
-            "Anchor source generated and structurally validated; build, Kani and anchor test stages pending (Phase 2)",
+            f"Anchor source generated and structurally validated; Kani {kani['status']}; "
+            "build and anchor test stages pending",
+            kani=kani,
         )
         return True
 
-    _write_result(False, last_reason)
+    _write_result(False, last_reason, kani=_kani_skipped(
+        "kani not run in mode '%s'" % mode if mode not in SOLANA_KANI_MODES
+        else "no structurally valid source"
+    ))
     return False
