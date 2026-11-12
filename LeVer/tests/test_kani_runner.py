@@ -257,11 +257,11 @@ class TestExtractCounterexample(unittest.TestCase):
 
 class TestStages(unittest.TestCase):
 
-    def test_verify_and_counterexample_implemented_formal_spec_not(self):
+    def test_formal_spec_verify_and_counterexample_implemented(self):
         stages = SolanaAdapter.implemented_stages
+        self.assertIn("formal_spec", stages)
         self.assertIn("verify", stages)
         self.assertIn("counterexample", stages)
-        self.assertNotIn("formal_spec", stages)
         self.assertNotIn("counterexample", SolanaAdapter().describe()["missing_stages"])
 
 

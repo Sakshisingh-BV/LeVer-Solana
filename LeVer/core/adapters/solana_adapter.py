@@ -8,12 +8,12 @@
 #   is_valid_source() → core.pipeline.solana_utils.is_plausible_anchor_source()
 #
 # Phase 2 (implemented):
+#   generate_formal_spec()   → core.solana_agents.KaniHarnessWriter (scaffold fallback)
 #   verify_spec()            → "cargo kani" on a standalone crate (pipeline/kani_utils.py)
 #   extract_counterexample() → kani_utils.extract_kani_counterexample()
 #
 # Phase 2 (planned — see SOLANA_VERIFICATION_ROADMAP.md, NOT implemented):
 #   check_compilation()      → "anchor build"
-#   generate_formal_spec()   → Kani harness generation (pipeline/kani_utils.py)
 #   generate_test_harness()  → Anchor TS/Rust tests
 #   run_tests()              → "anchor test" + solana-test-validator
 # ──────────────────────────────────────────────────────────────────────
@@ -78,11 +78,12 @@ class SolanaAdapter(TargetAdapter):
     toolchain = "Anchor CLI + solana-test-validator + Kani"
     required_tools = ("anchor", "solana", "cargo", "cargo-kani")
     optional_tools = ("solana-test-validator",)
-    implemented_stages = ("generate", "repair", "validate", "verify", "counterexample")
+    implemented_stages = ("generate", "repair", "validate", "formal_spec", "verify", "counterexample")
 
     def __init__(self, model_name: Optional[str] = None, **kwargs: Any):
         self.model_name = model_name or os.getenv("LLM_MODEL") or None
         self._coder = None
+        self._harness_writer = None
         #: Fidelity of the last generated Kani spec (set by the spec stage), if known.
         self.last_fidelity: Optional[str] = None
         #: Contents of kani_result.json from the last verify_spec() call.
@@ -94,6 +95,13 @@ class SolanaAdapter(TargetAdapter):
             from core.solana_agents import AnchorCoder
             self._coder = AnchorCoder(model_name=self.model_name)
         return self._coder
+
+    @property
+    def harness_writer(self):
+        if self._harness_writer is None:
+            from core.solana_agents import KaniHarnessWriter
+            self._harness_writer = KaniHarnessWriter(model_name=self.model_name)
+        return self._harness_writer
 
     # ── Code Generation ──────────────────────────────────────────────
     def generate_code(self, requirement, properties, *, feedback_constraints=None, **kwargs) -> str:
@@ -112,7 +120,28 @@ class SolanaAdapter(TargetAdapter):
 
     # ── Formal Verification ──────────────────────────────────────────
     def generate_formal_spec(self, code, properties, **kwargs) -> str:
-        raise NotImplementedError(f"SolanaAdapter.generate_formal_spec (Kani harness) — {ROADMAP}")
+        """Kani crate ``lib.rs`` for the Kani-eligible subset of *properties*.
+
+        Returns "" (and leaves ``last_fidelity`` unchanged) when no property is
+        Kani-eligible. Otherwise sets ``last_fidelity`` to:
+          - ``"real"``     — the program's dependency-free ``logic`` module is verified;
+          - ``"model"``    — harnesses check an LLM-written plain-struct model;
+          - ``"scaffold"`` — the LLM failed or its output was rejected, so the
+                             always-failing scaffolds were returned (fail-closed).
+        """
+        from core.pipeline.kani_utils import extract_logic_module
+        from core.solana_agents import kani_property_ids
+
+        eligible = kani_property_ids(properties)
+        if not eligible:
+            return ""
+        logic = extract_logic_module(code)
+        self.last_fidelity = "real" if logic is not None else "model"
+        writer = self.harness_writer
+        spec = writer.write_kani_harness(code, eligible, logic_module=logic)
+        if writer.last_used_fallback:
+            self.last_fidelity = "scaffold"
+        return spec
 
     def verify_spec(
         self, spec: str, workspace: str, *, timeout: Optional[float] = None, **kwargs: Any
