@@ -58,7 +58,12 @@ class SimulationRunner:
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
         else:
-            kwargs["temperature"] = 0.2
+            # Only send temperature when explicitly configured: newer models
+            # (e.g. Claude Opus 5.5) reject it with a 400. Set LLM_TEMPERATURE=0.2
+            # to restore the previous behaviour.
+            temperature = os.getenv("LLM_TEMPERATURE", "").strip()
+            if temperature:
+                kwargs["temperature"] = float(temperature)
             kwargs["max_tokens"] = int(os.getenv("LLM_MAX_COMPLETION_TOKENS", "12000"))
         request_timeout = os.getenv("LLM_REQUEST_TIMEOUT", "300")
         kwargs["timeout"] = float(request_timeout)
