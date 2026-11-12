@@ -234,6 +234,31 @@ class KaniWorkflowTestCase(unittest.TestCase):
         self.assertIn("proves nothing", kani["warning"])
         self.assertEqual(kani["status"], "failed")
 
+    def test_scaffold_failure_adds_no_feedback_constraints(self):
+        messages = ["SOL-07 sol_07_arithmetic_overflow: scaffold placeholder @ src/lib.rs:5"]
+        for fidelity, expect_feedback in (("scaffold", False), ("real", True), ("model", True)):
+            with self.subTest(fidelity=fidelity):
+                self.setUp()
+                adapter = FakeAdapter(
+                    ok=False,
+                    fidelity=fidelity,
+                    messages=messages,
+                    kani_result={"properties": _props(SOL_07="FAILED")},
+                )
+                before = list(self.ctx.feedback_constraints)
+                _, result = self.run_workflow(adapter)
+
+                kani = result["verification"]["kani"]
+                self.assertEqual(kani["status"], "failed")
+                self.assertEqual(kani["fidelity"], fidelity)
+                self.assertEqual(kani["messages"], messages)
+                if expect_feedback:
+                    self.assertEqual(self.ctx.feedback_constraints, before + [f"Kani: {m}" for m in messages])
+                    self.assertNotIn("warning", kani)
+                else:
+                    self.assertEqual(self.ctx.feedback_constraints, before)
+                    self.assertIn("warning", kani)
+
 
 if __name__ == "__main__":
     unittest.main()

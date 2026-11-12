@@ -110,7 +110,7 @@ def main(argv=None) -> int:
             )
             final_path = workspace / "result.json"
             result = json.loads(final_path.read_text(encoding="utf-8"))
-            print(f"\nPIPELINE {'GENERATED' if passed else 'FAILED'}: solana/{args.mode} (verification stages pending - Phase 2)")
+            print(f"\nPIPELINE {'GENERATED' if passed else 'FAILED'}: solana/{args.mode} (Kani stage non-blocking; anchor build/test not run)")
             print(f"Result: {final_path}")
             print(f"Iterations: {result.get('iterations')}")
             return 0 if passed else 1

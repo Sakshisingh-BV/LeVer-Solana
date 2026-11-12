@@ -505,7 +505,8 @@ def _run_solana_kani(ctx, adapter, code, mode, properties=DEFAULT_SOLANA_KANI_PR
     """Kani stage for the Solana workflow; returns the result.json ``kani`` section.
 
     Never raises: an exception from spec generation or ``verify_spec`` is recorded as
-    ``infra_error``. Only genuine verification failures add ``ctx.feedback_constraints``.
+    ``infra_error``. Only genuine verification failures (non-scaffold fidelity) add
+    ``ctx.feedback_constraints``.
     """
     if mode not in SOLANA_KANI_MODES:
         return _kani_skipped(f"kani not run in mode '{mode}'")
@@ -565,7 +566,9 @@ def _run_solana_kani(ctx, adapter, code, mode, properties=DEFAULT_SOLANA_KANI_PR
         GLOBAL_LOGGER.log_system("KANI_SCAFFOLD", _SCAFFOLD_WARNING)
         print(f"   WARNING: {_SCAFFOLD_WARNING}")
 
-    if status == "failed":
+    # Scaffold harnesses are unfilled placeholders that always fail; their messages
+    # say nothing about the program, so they must not steer repair.
+    if status == "failed" and fidelity != "scaffold":
         ctx.feedback_constraints.extend(f"Kani: {m}" for m in messages)
     GLOBAL_LOGGER.log_system(
         "KANI_RESULT", json.dumps({"status": status, "fidelity": fidelity, "messages": messages})
