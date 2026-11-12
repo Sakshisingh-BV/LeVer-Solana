@@ -108,6 +108,62 @@ class TestParseKaniOutputCounterexamples(unittest.TestCase):
         result = parse_kani_output(_recorded("success.txt"), "", 0)
         self.assertEqual(result["counterexamples"], [])
 
+    def test_success_counts_check_names_with_spaces(self):
+        result = parse_kani_output(_recorded("success.txt"), "", 0)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["verified"], 3)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(
+            result["passed_checks"],
+            [
+                "core::num::<impl u64>::checked_add.arithmetic_overflow.1",
+                "sol_07_checked_ok.unreachable.1",
+                "sol_07_checked_ok.assertion.1",
+            ],
+        )
+
+    def test_failure_in_check_name_with_spaces_detected(self):
+        text = (
+            "Checking harness sol_07_overflow...\n"
+            "\n"
+            "RESULTS:\n"
+            "Check 1: core::num::<impl u64>::checked_add.arithmetic_overflow.1\n"
+            "         - Status: FAILURE\n"
+            "         - Description: \"attempt to compute `unchecked_add` which would overflow\"\n"
+            "         - Location: library/core/src/num/uint_macros.rs:942:31 in function core::num::<impl u64>::checked_add\n"
+            "\n"
+            "Check 2: sol_07_overflow.assertion.1\n"
+            "         - Status: SUCCESS\n"
+            "         - Description: \"assertion failed: s >= a\"\n"
+            "         - Location: src/lib.rs:8:5 in function sol_07_overflow\n"
+            "\n"
+            "SUMMARY:\n"
+            " ** 1 of 2 failed\n"
+            "\n"
+            "VERIFICATION:- FAILED\n"
+        )
+        name = "core::num::<impl u64>::checked_add.arithmetic_overflow.1"
+        # Exit code 0 on purpose: the failure must be caught from the check itself too.
+        result = parse_kani_output(text, "", 0)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["failed_checks"], [name])
+        self.assertEqual(result["passed_checks"], ["sol_07_overflow.assertion.1"])
+        failed = [c for c in result["checks"] if c["status"] == "FAILURE"][0]
+        self.assertEqual(failed["harness"], "sol_07_overflow")
+        self.assertEqual(
+            failed["description"], "attempt to compute `unchecked_add` which would overflow"
+        )
+
+        cex = extract_kani_counterexample(text)
+        self.assertIsNotNone(cex)
+        self.assertEqual(cex["harness"], "sol_07_overflow")
+        self.assertEqual(cex["check"], name)
+
+        # CRLF output is handled the same way.
+        crlf = parse_kani_output(text.replace("\n", "\r\n"), "", 1)
+        self.assertEqual(crlf["failed_checks"], [name])
+
     def test_multi_harness_one_entry_per_failed_harness(self):
         result = parse_kani_output(_recorded("multi_harness.txt"), "", 1)
         self.assertEqual(

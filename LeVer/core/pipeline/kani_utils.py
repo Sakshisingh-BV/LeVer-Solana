@@ -24,8 +24,10 @@ UNFILLED_MARKER = "LEVER_UNFILLED_HARNESS"
 #   	 - Status: FAILURE
 #   	 - Description: "attempt to add with overflow"
 #   	 - Location: src/lib.rs:13:17 in function check_add
+# Check names can contain spaces (e.g. "core::num::<impl u64>::checked_add.arithmetic_overflow.1"),
+# so the name runs to the end of the line.
 _KANI_CHECK_RE = re.compile(
-    r"^Check\s+(\d+):\s*(\S+)[ \t]*\n"
+    r"^Check[ \t]+(\d+):[ \t]*(\S[^\n]*?)[ \t]*\n"
     r"\s*-\s*Status:\s*([A-Z_]+)[ \t]*"
     r"(?:\n\s*-\s*Description:\s*\"(.*)\"[ \t]*)?"
     r"(?:\n\s*-\s*Location:\s*([^\n]*))?",
