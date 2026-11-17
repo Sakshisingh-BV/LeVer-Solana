@@ -208,6 +208,11 @@ class KaniHarnessWriter(BaseAgent):
         "7. Keep the file compact (aim for well under 450 lines): put shared setup in helper\n"
         "   functions, never repeat model code, keep comments short. A file that is cut off\n"
         "   before its last closing brace does not compile and is rejected.\n"
+        "8. PDAs have no private key, so a PDA can never be a Signer. Whenever an account is\n"
+        "   required to equal a derived PDA, kani::assume that every signer-capable input key\n"
+        "   differs from that PDA (e.g. `kani::assume(depositor.key != pda(&owner, bump))`).\n"
+        "   Model every account constraint of the program (signer, mut, owner, seeds, has_one)\n"
+        "   exactly; never add checks the program does not have.\n"
     )
 
     #: LLM attempts (first try + retries) before falling back to fail-closed scaffolds.
