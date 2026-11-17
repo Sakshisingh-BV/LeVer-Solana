@@ -338,6 +338,19 @@ def _count(value: Any) -> int:
         return 0
 
 
+def _kani_no_verdict(kani: Optional[Dict[str, Any]]) -> bool:
+    """Kani reported failure but no property actually failed (e.g. the harness did not compile)."""
+    if not kani or _kani_status(kani.get("status")) != "failed":
+        return False
+    props = kani.get("properties") or {}
+    return not any(_kani_status(s) == "failed" for s in props.values())
+
+
+def _kani_run_messages(kani: Optional[Dict[str, Any]]) -> List[str]:
+    """Kani messages that are not per-property counterexamples."""
+    return [str(m) for m in (kani or {}).get("messages") or [] if not _KANI_MESSAGE.match(str(m))]
+
+
 def _harness_label(harness: str) -> str:
     """``verification::sol_01_signer_check`` -> ``signer check``."""
     name = harness.rsplit("::", 1)[-1]
@@ -420,7 +433,13 @@ class SolanaResultMapper(ResultMapper):
                        f", {_count(kani_raw.get('failed_checks'))} failed.")
         if fidelity == "model":
             detail += " Harnesses check a plain-Rust model of the program, not the deployed Anchor code."
-        checks = [_check(name, _kani_status(kani.get("status")), detail)]
+        if _kani_no_verdict(kani):
+            reason = "; ".join(_kani_run_messages(kani)) or "no failing check was reported"
+            checks = [_check(name, "unknown",
+                             f"Kani did not produce a verdict ({reason}). The harness may not have compiled; "
+                             "no property was disproved.")]
+        else:
+            checks = [_check(name, _kani_status(kani.get("status")), detail)]
 
         harness_names = {}
         for harness in (kani_raw.get("harnesses") or {}):
@@ -439,6 +458,8 @@ class SolanaResultMapper(ResultMapper):
                 detail = "Harness verified: no counterexample within the explored bounds."
             elif status == "failed":
                 detail = "Counterexample found: " + messages.get(pid, "see issues and Kani output.")
+            elif _kani_no_verdict(kani):
+                detail = "Not checked: Kani did not run this harness."
             else:
                 detail = f"Kani reported '{props[pid]}'."
             checks.append(_check(label, status, detail))
@@ -460,6 +481,11 @@ class SolanaResultMapper(ResultMapper):
             return {"status": "skipped", "checks": checks,
                     "detail": "Anchor program generated and validated. Kani, anchor build and local-validator "
                               "tests were not executed."}
+        if _kani_no_verdict(kani):
+            reason = "; ".join(_kani_run_messages(kani)) or "no failing check was reported"
+            return {"status": "unknown", "checks": checks,
+                    "detail": f"Kani did not produce a verdict ({reason}). No property was disproved; "
+                              "the harness most likely failed to compile."}
         status = _kani_status(kani.get("status"))
         detail = {
             "passed": "All Kani harnesses verified. anchor build / anchor test are still pending (roadmap).",
@@ -500,6 +526,12 @@ class SolanaResultMapper(ResultMapper):
             if line_match:
                 issue["line"] = int(line_match.group(1))
             issues.append(issue)
+        if _kani_no_verdict(kani):
+            issues.append({"id": "kani-no-verdict", "title": "Kani did not produce a verdict", "severity": "infrastructure",
+                           "description": "; ".join(_kani_run_messages(kani)) or "Kani exited with an error but reported no failing check.",
+                           "file": KANI_LIB_PATH,
+                           "suggestion": "Compile the harness (cargo kani in kani_workspace) to see the error; "
+                                         "a truncated or invalid lib.rs is the usual cause."})
         surface = (kani or {}).get("unverified_surface") or []
         if surface:
             issues.append({"id": "kani-unverified", "title": "Properties without a Kani harness", "severity": "coverage",

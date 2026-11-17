@@ -147,6 +147,16 @@ def validate_kani_harness(source: str, property_ids: List[str], *,
         errors.append("no #[kani::proof] harness")
     if _ANCHOR_LANG_RE.search(masked):
         errors.append("references anchor_lang")
+    depth = 0
+    for ch in masked:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                break
+    if depth != 0:
+        errors.append("unbalanced braces (output truncated or malformed)")
 
     found: Dict[str, List[str]] = {}
     for m in _SOL_HARNESS_FN_RE.finditer(masked):
@@ -195,7 +205,13 @@ class KaniHarnessWriter(BaseAgent):
         "   Compare post-call values only against that snapshot, never against an\n"
         "   earlier baseline (like a `good` setup) that the setup has since changed.\n"
         "   Never modify a snapshot or expected value after the call.\n"
+        "7. Keep the file compact (aim for well under 450 lines): put shared setup in helper\n"
+        "   functions, never repeat model code, keep comments short. A file that is cut off\n"
+        "   before its last closing brace does not compile and is rejected.\n"
     )
+
+    #: LLM attempts (first try + retries) before falling back to fail-closed scaffolds.
+    MAX_ATTEMPTS = 2
 
     def __init__(self, model_name: Optional[str] = None, api_key: Optional[str] = None,
                  base_url: Optional[str] = None, **kwargs: Any):
@@ -255,13 +271,26 @@ class KaniHarnessWriter(BaseAgent):
         Return the complete standalone Kani `lib.rs`.
         """
         print("   KaniHarnessWriter is writing Kani harnesses...")
-        try:
-            source = self._query_llm(self.SYSTEM_PROMPT, user_prompt) or ""
-            errors = validate_kani_harness(source, ids, logic_module=logic_module)
-        except Exception as e:  # any LLM failure -> fail closed
-            source, errors = "", [f"LLM error: {e}"]
-        if not errors:
-            return source if source.endswith("\n") else source + "\n"
+        prompt = user_prompt
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            try:
+                source = self._query_llm(self.SYSTEM_PROMPT, prompt) or ""
+                errors = validate_kani_harness(source, ids, logic_module=logic_module)
+            except Exception as e:  # any LLM failure -> fail closed
+                source, errors = "", [f"LLM error: {e}"]
+                break  # infrastructure error: do not retry, fail closed
+            if not errors:
+                return source if source.endswith("\n") else source + "\n"
+            if attempt < self.MAX_ATTEMPTS:
+                print(f"   KaniHarnessWriter output rejected ({'; '.join(errors)}); retrying "
+                      f"({attempt + 1}/{self.MAX_ATTEMPTS})...")
+                prompt = (
+                    user_prompt
+                    + "\n[PREVIOUS ATTEMPT REJECTED]\n"
+                    + "\n".join(f"- {e}" for e in errors)
+                    + "\nWrite the complete lib.rs again. If it was cut off, make it SHORTER: shared "
+                      "helpers, no duplicated setup, minimal comments.\n"
+                )
 
         print(f"   KaniHarnessWriter output rejected ({'; '.join(errors)}); using fail-closed scaffolds.")
         self.last_used_fallback = True
