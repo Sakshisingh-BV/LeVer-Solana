@@ -648,7 +648,12 @@ def workflow_solana_generate_only(ctx, adapter, requirement, mode, max_iters=3):
         print("   Anchor source saved to Target.rs")
 
         print(f"3. Kani verification (mode: {mode})...")
-        kani = _run_solana_kani(ctx, adapter, candidate, mode)
+        from core.solana_property_selector import select_solana_kani_properties
+        kani_props, kani_reasons = select_solana_kani_properties(candidate)
+        if kani_reasons:
+            print("   Kani properties added from code: "
+                  + ", ".join(f"{pid} ({why})" for pid, why in kani_reasons.items()))
+        kani = _run_solana_kani(ctx, adapter, candidate, mode, properties=kani_props)
         ctx.checkpoint.save_stage("kani_result", kani)
 
         print("4. Anchor build / anchor test: not implemented (see SOLANA_VERIFICATION_ROADMAP.md).")
